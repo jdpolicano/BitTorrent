@@ -7,27 +7,66 @@ bool is_digit(char c) {
     return c >= '0' && c <= '9';
 }
 
-char* decode_bencode(const char* bencoded_value) {
-    if (is_digit(bencoded_value[0])) {
-        // todo - switch with more stable strtol...
-        // parse the length of the string up to ':';
+bool is_bencoded_int(char c) {
+    return c == 'i'; 
+}
+
+char* decode_bencoded_string(const char* bencoded_string) {
         char *endptr;
-        long length = strtol(bencoded_value, &endptr, 10); 
+        // this should not fail considering we checked if it has a digit first.
+        long length = strtol(bencoded_string, &endptr, 10); 
 
         if (endptr[0] == ':')
         {
             const char* start = endptr + 1;
-            char* decoded_str = (char*)malloc(length + 1);
+            char* decoded_str = malloc(length + 1);
             strncpy(decoded_str, start, length);
             decoded_str[length] = '\0';
             return decoded_str;
         }
         else
         {
-            fprintf(stderr, "Invalid encoded value: %s\n", bencoded_value);
+            fprintf(stderr, "Invalid encoded value: %s\n", bencoded_string);
             exit(1);
         }
-    } else {
+
+}
+
+char* decode_bencoded_integer(const char* bencoded_integer) {
+    const char* start = bencoded_integer + 1; // cut out the encoding character, this is already checked.
+    const char* end = strchr(bencoded_integer, 'e');
+
+    if (end == NULL)
+    {
+        fprintf(stderr, "Invalid encoded value %s\n", bencoded_integer);
+        exit(1);
+    }
+
+    size_t length = end - start;
+    char* ascii_integer = malloc(length + 1);
+    if (ascii_integer == NULL)
+    {
+        fprintf(stderr, "ERR program out of heap memory");
+        exit(1);
+    }
+    
+    strncpy(ascii_integer, start, length);
+    ascii_integer[length] = '\0';
+    return ascii_integer; 
+}
+
+char* decode_bencode(const char* bencoded_value) {
+    // string
+    if (is_digit(bencoded_value[0])) 
+    {
+        return decode_bencoded_string(bencoded_value);
+    }
+    else if (is_bencoded_int(bencoded_value[0]))
+    {
+        return decode_bencoded_integer(bencoded_value);
+    }
+    else
+    {
         fprintf(stderr, "Only strings are supported at the moment\n");
         exit(1);
     }
