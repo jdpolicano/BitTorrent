@@ -3,6 +3,33 @@
 #include <string.h>
 #include <stdbool.h>
 
+typedef enum 
+{
+    INTEGER,
+    STRING,
+} BType;
+
+typedef struct {
+    // a type flag.
+    BType type;
+    // the body of the decoded value without encoding information.
+    char* value;
+} Bencoded;
+
+void print_bencoded(Bencoded b) {
+    switch(b.type) {
+        case INTEGER:  {
+            long parsed = strtol(b.value, NULL, 10);
+            printf("%lu\n", parsed);
+            break;
+        }
+
+        case STRING: {
+            printf("\"%s\"\n", b.value);
+        }
+    }
+}
+
 bool is_digit(char c) {
     return c >= '0' && c <= '9';
 }
@@ -11,7 +38,23 @@ bool is_bencoded_int(char c) {
     return c == 'i'; 
 }
 
-char* decode_bencoded_string(const char* bencoded_string) {
+Bencoded* get_bencoded(BType t, char* v) {
+    Bencoded *bcode = malloc(sizeof(Bencoded));
+    if (bcode == NULL) {
+        fprintf(stderr, "could not alloc memory for new bencode.");
+        return NULL;
+    };
+    bcode->type = t;
+    bcode->value = v;
+    return bcode;
+};
+
+void free_bencoded(Bencoded* b) {
+    free(b->value);
+    free(b);
+};
+
+Bencoded* decode_bencoded_string(const char* bencoded_string) {
         char *endptr;
         // this should not fail considering we checked if it has a digit first.
         long length = strtol(bencoded_string, &endptr, 10); 
@@ -20,9 +63,21 @@ char* decode_bencoded_string(const char* bencoded_string) {
         {
             const char* start = endptr + 1;
             char* decoded_str = malloc(length + 1);
+            if (decoded_str == NULL) 
+            {
+                fprintf(stderr, "ERR program out of heap memory (decoding string)");
+                exit(1);
+            }
+
             strncpy(decoded_str, start, length);
             decoded_str[length] = '\0';
-            return decoded_str;
+            Bencoded *b = get_bencoded(STRING, decoded_str);
+            if (b == NULL) 
+            {
+                fprintf(stderr, "ERR program out of heap memory (decoding string)");
+                exit(1);
+            };
+            return b;
         }
         else
         {
@@ -32,7 +87,7 @@ char* decode_bencoded_string(const char* bencoded_string) {
 
 }
 
-char* decode_bencoded_integer(const char* bencoded_integer) {
+Bencoded* decode_bencoded_integer(const char* bencoded_integer) {
     const char* start = bencoded_integer + 1; // cut out the encoding character, this is already checked.
     const char* end = strchr(bencoded_integer, 'e');
 
@@ -46,16 +101,22 @@ char* decode_bencoded_integer(const char* bencoded_integer) {
     char* ascii_integer = malloc(length + 1);
     if (ascii_integer == NULL)
     {
-        fprintf(stderr, "ERR program out of heap memory");
+        fprintf(stderr, "ERR program out of heap memory (decoding integer)");
         exit(1);
     }
-    
+
     strncpy(ascii_integer, start, length);
     ascii_integer[length] = '\0';
-    return ascii_integer; 
+    Bencoded *b = get_bencoded(INTEGER, ascii_integer);
+    if (b == NULL)
+    {
+        fprintf(stderr, "ERR program out of heap memory (decoding integer)");
+        exit(1);
+    };
+    return b;
 }
 
-char* decode_bencode(const char* bencoded_value) {
+Bencoded* decode_bencode(const char* bencoded_value) {
     // string
     if (is_digit(bencoded_value[0])) 
     {
@@ -90,9 +151,9 @@ int main(int argc, char* argv[]) {
             
         // Uncomment this block to pass the first stage
         const char* encoded_str = argv[2];
-        char* decoded_str = decode_bencode(encoded_str);
-        printf("\"%s\"\n", decoded_str);
-        free(decoded_str);
+        Bencoded* decoded = decode_bencode(encoded_str);
+        print_bencoded(*decoded);
+        free(decoded);
     } else {
         fprintf(stderr, "Unknown command: %s\n", command);
         return 1;
