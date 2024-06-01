@@ -19,8 +19,7 @@ typedef struct {
 void print_bencoded(Bencoded b) {
     switch(b.type) {
         case INTEGER:  {
-            long parsed = strtol(b.value, NULL, 10);
-            printf("%lu\n", parsed);
+            printf("%s\n", b.value);
             break;
         }
 
