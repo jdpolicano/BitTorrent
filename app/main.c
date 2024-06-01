@@ -9,15 +9,21 @@ bool is_digit(char c) {
 
 char* decode_bencode(const char* bencoded_value) {
     if (is_digit(bencoded_value[0])) {
-        int length = atoi(bencoded_value);
-        const char* colon_index = strchr(bencoded_value, ':');
-        if (colon_index != NULL) {
-            const char* start = colon_index + 1;
+        // todo - switch with more stable strtol...
+        // parse the length of the string up to ':';
+        char *endptr;
+        long length = strtol(bencoded_value, &endptr, 10); 
+
+        if (endptr[0] == ':')
+        {
+            const char* start = endptr + 1;
             char* decoded_str = (char*)malloc(length + 1);
             strncpy(decoded_str, start, length);
             decoded_str[length] = '\0';
             return decoded_str;
-        } else {
+        }
+        else
+        {
             fprintf(stderr, "Invalid encoded value: %s\n", bencoded_value);
             exit(1);
         }
@@ -44,10 +50,10 @@ int main(int argc, char* argv[]) {
         printf("Logs from your program will appear here!\n");
             
         // Uncomment this block to pass the first stage
-        // const char* encoded_str = argv[2];
-        // char* decoded_str = decode_bencode(encoded_str);
-        // printf("\"%s\"\n", decoded_str);
-        // free(decoded_str);
+        const char* encoded_str = argv[2];
+        char* decoded_str = decode_bencode(encoded_str);
+        printf("\"%s\"\n", decoded_str);
+        free(decoded_str);
     } else {
         fprintf(stderr, "Unknown command: %s\n", command);
         return 1;
