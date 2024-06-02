@@ -17,24 +17,44 @@ typedef enum
 {
     INTEGER,
     STRING,
-    LIST
+    LIST,
+    DICTIONARY
 } BType;
 
+// Forward declaration of Bencoded
 typedef struct Bencoded Bencoded;
 
+// Separate struct for list data
+typedef struct {
+    size_t capacity;
+    size_t size;
+    Bencoded* elements;
+} BencodedList;
+
+// Separate struct for dictionary elements
+typedef struct {
+    char* key;
+    Bencoded* value;
+} BencodedDictElement;
+
+// Separate struct for dictionary data
+typedef struct {
+    size_t capacity;
+    size_t size;
+    BencodedDictElement* elements;
+} BencodedDictionary;
+
+// Bencoded struct using separate inner structs
 struct Bencoded {
-    // a type flag.
     BType type;
     union {
-        char* string; // if string type
-        long integer; // if integer type.
-        struct {
-            size_t capacity; // how many items the list can fit.
-            size_t size; /// how many items the data currently holds.
-            Bencoded* elements; // the elements array. 
-        } list;
+        char* string;
+        long integer;
+        BencodedList list;
+        BencodedDictionary dictionary;
     } data;
 };
+
 
 void print_bencoded(Bencoded b,  bool flush_output);
 bool is_digit(char c);
@@ -44,6 +64,7 @@ void free_bencoded(Bencoded* b);
 const char* decode_bencoded_string(const char* bencoded_string, Bencoded* container);
 const char* decode_bencoded_integer(const char* bencoded_integer, Bencoded* container);
 const char* decode_bencoded_list(const char* bencoded_list, Bencoded* container);
+const char* decode_bencoded_dictionary(const char* bencoded_dict, Bencoded* container);
 const char* decode_bencode(const char* bencoded_value, Bencoded* container);
 
 /**
@@ -75,6 +96,19 @@ void print_bencoded(Bencoded b, bool flush_output)
             }
             printf("]");
             break;
+        }
+
+        case DICTIONARY: {
+            printf("{");
+            for (size_t i = 0; i < b.data.dictionary.size; i++) {
+                BencodedDictElement el = b.data.dictionary.elements[i];
+                printf("\"%s\": ", el.key);
+                print_bencoded(*el.value, false);
+                if (i != b.data.dictionary.size - 1) {
+                    printf(", ");
+                }
+            }
+            printf("}");
         }
     }
 
@@ -229,7 +263,7 @@ const char* decode_bencoded_list(const char* bencoded_list, Bencoded* container)
     // setup the list for some pushing.
     size_t size = 0;
     // this feels really flimsy...
-    while(bencoded_list[0] != 'e') {
+    while(bencoded_list[0] != 'e' && bencoded_list[0] != '\0') {
         bencoded_list = decode_bencode(bencoded_list, &elements[size++]);
         if (size == capacity) {
             capacity *= 2;
@@ -243,10 +277,84 @@ const char* decode_bencoded_list(const char* bencoded_list, Bencoded* container)
         }
     }
 
+    if (bencoded_list[0] != 'e') 
+    {
+        fprintf(stderr, "bencoded list terminated unexpectedly");
+        exit(1);
+    }
+
     container->data.list.size = size;
     container->data.list.capacity = capacity;
     container->data.list.elements = elements;
+
     return bencoded_list + 1;
+}
+
+/**
+ * a decoding function takes a string to decode and the containter to decode it into. It will return a pointer to the new "head"
+ * of the original stream it was parsing. This function is specifically for decoding dictionaries. It will return a pointer to the new "head".  
+ * @param bencoded_dict the string to decode.
+ * @param container the container to decode the string into.
+ * @return a pointer to the new head of the stream.
+*/
+const char* decode_bencoded_dictionary(const char* bencoded_dict, Bencoded* container) {
+    size_t capacity = 1024;
+    BencodedDictElement* elements = malloc(sizeof(BencodedDictElement) * capacity);
+    if (elements == NULL) 
+    {
+        fprintf(stderr, "ERR heap out of memory, decoding dictionary -> %s\n", bencoded_dict);
+        exit(1);
+    }
+    size_t size = 0;
+
+
+    while (bencoded_dict[0] != 'e' && bencoded_dict[0] != '\0') {
+        // the key container will be discarded after this loop.
+        // so no need to allocate dynamic memory for it.
+        Bencoded key_container;
+        bencoded_dict = decode_bencode(bencoded_dict, &key_container);
+        if (key_container.type != STRING) 
+        {
+            fprintf(stderr, "dictionary key is not a string");
+            exit(1);
+        }
+
+        // this, however, will be kept.
+        Bencoded *value_container = get_bencoded();
+        if (value_container == NULL) 
+        {
+            fprintf(stderr, "ERR could not allocate memory for bencoded container\n");
+            exit(1);
+        }
+        bencoded_dict = decode_bencode(bencoded_dict, value_container);
+
+        // push the key and value into the dictionary.
+        elements[size].key = key_container.data.string;
+        elements[size].value = value_container;
+        size++;
+        // resize the dictionary if necessary.
+        if (size == capacity) {
+            capacity *= 2;
+            BencodedDictElement *tmp = realloc(elements, capacity);
+            if (tmp == NULL) 
+            {
+                fprintf(stderr, "failed to resize the bencoded dictionary\n");
+                exit(1);
+            }
+            elements = tmp;
+        }
+    }
+
+    if (bencoded_dict[0] != 'e') 
+    {
+        fprintf(stderr, "bencoded dictionary terminated unexpectedly");
+        exit(1);
+    }
+
+    container->data.dictionary.size = size;
+    container->data.dictionary.capacity = capacity;
+    container->data.dictionary.elements = elements;
+    return bencoded_dict + 1;
 }
 
 /**
@@ -279,6 +387,12 @@ const char* decode_bencode(const char* bencoded_value, Bencoded* container) {
         return decode_bencoded_list(bencoded_value + 1, container);
     }
 
+    else if (bencoded_value[0] == 'd')
+    {
+        container->type = DICTIONARY;
+        return decode_bencoded_dictionary(bencoded_value + 1, container);
+    }
+
     else
     {
         fprintf(stderr, "Only strings + integers + lists are supported at the moment\nReceived: %s\n", bencoded_value);
@@ -307,7 +421,6 @@ int main(int argc, char* argv[]) {
         }
         const char* endstr = decode_bencode(encoded_str, container);
         print_bencoded(*container, true);
-        // todo handle freeing up this bish...
         free_bencoded(container);
     }
     else
