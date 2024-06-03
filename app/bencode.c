@@ -8,6 +8,8 @@
  */
 #include "bencode.h"
 
+size_t route_bencode(Bencoded b, char *target);
+
 /**
  * Prints the given Bencoded data structure.
  *
@@ -370,6 +372,85 @@ const char* decode_bencode(const char* bencoded_value, Bencoded* container) {
     }
 }
 
+size_t encode_string(Bencoded b, char* target)
+{
+    size_t nbytes = 0;
+    size_t length = strlen(b.data.string);
+    nbytes += sprintf(target, "%li:%s", length, b.data.string);
+    return nbytes;
+}
+
+size_t encode_integer(Bencoded b, char* target)
+{
+    size_t nbytes = 0;
+    nbytes += sprintf(target, "i%lde", b.data.integer);
+    return nbytes;
+}
+
+size_t encode_list(Bencoded b, char* target)
+{
+    size_t nbytes = 0;
+    target[nbytes++] = 'l';
+
+    for (size_t i = 0; i < b.data.list.size; i++)
+    {
+        nbytes += route_bencode(b.data.list.elements[i], target + nbytes);
+    }
+
+    target[nbytes++] = 'e';
+    return nbytes;
+}
+
+size_t encode_dict(Bencoded b, char *target) 
+{
+    size_t nbytes = 0;
+    target[nbytes++] = 'd';
+
+    for (size_t i = 0; i < b.data.dictionary.size; i++)
+    {
+        BencodedDictElement el = b.data.dictionary.elements[i];
+        Bencoded key;
+        key.type = STRING;
+        key.data.string = el.key;
+        nbytes += route_bencode(key, target + nbytes);
+        nbytes += route_bencode(*el.value, target + nbytes);
+    }
+
+    target[nbytes++] = 'e';
+    return nbytes;
+}
+
+size_t route_bencode(Bencoded b, char* target)
+{
+    if (b.type == STRING)
+    {
+        return encode_string(b, target);
+    }
+
+    if (b.type == INTEGER) 
+    {
+        return encode_integer(b, target);
+    }
+
+    if (b.type == LIST)
+    {
+        return encode_list(b, target);
+    }
+
+    if (b.type == DICTIONARY)
+    {
+        return encode_dict(b, target);
+    }
+
+    return 0;
+}
+
+size_t encode_bencode(Bencoded b, char* target)
+{
+    size_t nbytes = route_bencode(b, target);
+    target[nbytes] = '\0';
+    return nbytes;
+}
 
 /**
  * Gets a key from a bencoded dictionary.

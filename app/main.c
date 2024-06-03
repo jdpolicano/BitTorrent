@@ -7,13 +7,15 @@
  * The decoded value is then printed to the console.
  */
 #include "bencode.h"
+#include <openssl/sha.h>
 
-void handle_torrent_meta(Bencoded torrent);
+void print_torrent_meta(Bencoded torrent);
 void print_tracker_url(Bencoded announce);
 void print_info(Bencoded info);
+void print_torrent_hash(Bencoded info);
 char *read_file(const char *path);
 
-void handle_torrent_meta(Bencoded torrent)
+void print_torrent_meta(Bencoded torrent)
 {
     if (torrent.type != DICTIONARY)
     {
@@ -36,6 +38,17 @@ void handle_torrent_meta(Bencoded torrent)
         return;
     }
     print_info(*info);
+
+
+    char buf[10000]; // known to be big enough for now.
+    size_t size = encode_bencode(*info, buf);
+    unsigned char hash[SHA_DIGEST_LENGTH];
+    SHA1((unsigned char*)buf, size, hash);
+    printf("Info Hash: ");
+    for (int i = 0; i < SHA_DIGEST_LENGTH; i++) {
+        printf("%02x", hash[i]);
+    }
+    printf("\n");
     return;
 }
 
@@ -66,7 +79,7 @@ void print_info(Bencoded info)
         return;
     }
 
-    printf("Length: %li", length->data.integer);
+    printf("Length: %li\n", length->data.integer);
 }
 
 char* read_file(const char* path) {
@@ -129,7 +142,7 @@ int main(int argc, char* argv[]) {
         const char *file_contents = read_file(torrent_path);
         Bencoded container;
         const char *endstr = decode_bencode(file_contents, &container);
-        handle_torrent_meta(container);
+        print_torrent_meta(container);
         free_bencoded_inner(&container);
     }
     else

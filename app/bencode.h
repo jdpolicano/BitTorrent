@@ -60,5 +60,6 @@ void free_bencoded(Bencoded* b);
 void free_bencoded_inner(Bencoded* b);
 Bencoded* get_dict_key(const char* search_str, Bencoded b);
 const char *decode_bencode(const char *bencoded_value, Bencoded *container);
+size_t encode_bencode(Bencoded b, char *target);
 
 #endif // BENCODE_H
