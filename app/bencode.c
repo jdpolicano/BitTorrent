@@ -21,48 +21,48 @@ void print_bencoded(Bencoded b, bool flush_output)
 {
     switch (b.type)
     {
-    case INTEGER:
-    {
-        printf("%ld", b.data.integer);
-        break;
-    }
-
-    case STRING:
-    {
-        printf("\"%.*s\"", (int)b.data.string.size, b.data.string.chars);
-        break;
-    }
-
-    case LIST:
-    {
-        printf("[");
-        for (size_t i = 0; i < b.data.list.size; i++)
+        case INTEGER:
         {
-            print_bencoded(b.data.list.elements[i], false);
-            if (i != b.data.list.size - 1)
-            {
-                printf(",");
-            }
+            printf("%ld", b.data.integer);
+            break;
         }
-        printf("]");
-        break;
-    }
 
-    case DICTIONARY:
-    {
-        printf("{");
-        for (size_t i = 0; i < b.data.dictionary.size; i++)
+        case STRING:
         {
-            BencodedDictElement el = b.data.dictionary.elements[i];
-            printf("\"%.*s\":", (int)el.key.size, el.key.chars);
-            print_bencoded(*el.value, false);
-            if (i != b.data.dictionary.size - 1)
-            {
-                printf(",");
-            }
+            printf("\"%.*s\"", (int)b.data.string.size, b.data.string.chars);
+            break;
         }
-        printf("}");
-    }
+
+        case LIST:
+        {
+            printf("[");
+            for (size_t i = 0; i < b.data.list.size; i++)
+            {
+                print_bencoded(b.data.list.elements[i], false);
+                if (i != b.data.list.size - 1)
+                {
+                    printf(",");
+                }
+            }
+            printf("]");
+            break;
+        }
+
+        case DICTIONARY:
+        {
+            printf("{");
+            for (size_t i = 0; i < b.data.dictionary.size; i++)
+            {
+                BencodedDictElement el = b.data.dictionary.elements[i];
+                printf("\"%.*s\":", (int)el.key.size, el.key.chars);
+                print_bencoded(*el.value, false);
+                if (i != b.data.dictionary.size - 1)
+                {
+                    printf(",");
+                }
+            }
+            printf("}");
+        }
     }
 
     if (flush_output)
