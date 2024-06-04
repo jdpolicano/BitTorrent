@@ -9,6 +9,7 @@
 #include "bencode.h"
 
 size_t route_bencode(Bencoded b, char *target);
+size_t bencode_strcmp(BencodedString s, char *cmp);
 
 /**
  * Prints the given Bencoded data structure.
@@ -18,44 +19,54 @@ size_t route_bencode(Bencoded b, char *target);
  */
 void print_bencoded(Bencoded b, bool flush_output)
 {
-    switch(b.type) {
-        case INTEGER:  {
-            printf("%ld", b.data.integer);
-            break;
-        }
-
-        case STRING: {
-            printf("\"%s\"", b.data.string);
-            break;
-        }
-
-        case LIST: {
-            printf("[");
-            for (size_t i = 0; i < b.data.list.size; i++) {
-                print_bencoded(b.data.list.elements[i], false);
-                if (i != b.data.list.size - 1) {
-                    printf(", ");
-                }
-            }
-            printf("]");
-            break;
-        }
-
-        case DICTIONARY: {
-            printf("{");
-            for (size_t i = 0; i < b.data.dictionary.size; i++) {
-                BencodedDictElement el = b.data.dictionary.elements[i];
-                printf("\"%s\": ", el.key);
-                print_bencoded(*el.value, false);
-                if (i != b.data.dictionary.size - 1) {
-                    printf(", ");
-                }
-            }
-            printf("}");
-        }
+    switch (b.type)
+    {
+    case INTEGER:
+    {
+        printf("%ld", b.data.integer);
+        break;
     }
 
-    if (flush_output) {
+    case STRING:
+    {
+        printf("\"%s\"", b.data.string);
+        break;
+    }
+
+    case LIST:
+    {
+        printf("[");
+        for (size_t i = 0; i < b.data.list.size; i++)
+        {
+            print_bencoded(b.data.list.elements[i], false);
+            if (i != b.data.list.size - 1)
+            {
+                printf(", ");
+            }
+        }
+        printf("]");
+        break;
+    }
+
+    case DICTIONARY:
+    {
+        printf("{");
+        for (size_t i = 0; i < b.data.dictionary.size; i++)
+        {
+            BencodedDictElement el = b.data.dictionary.elements[i];
+            printf("\"%s\": ", el.key);
+            print_bencoded(*el.value, false);
+            if (i != b.data.dictionary.size - 1)
+            {
+                printf(", ");
+            }
+        }
+        printf("}");
+    }
+    }
+
+    if (flush_output)
+    {
         printf("\n");
     }
 }
@@ -66,7 +77,8 @@ void print_bencoded(Bencoded b, bool flush_output)
  * @param c The character to check.
  * @return true if the character is a digit, false otherwise.
  */
-bool is_digit(char c) {
+bool is_digit(char c)
+{
     return c >= '0' && c <= '9';
 }
 
@@ -76,8 +88,9 @@ bool is_digit(char c) {
  * @param c The character to check.
  * @return true if the character is 'i', false otherwise.
  */
-bool is_bencoded_int(char c) {
-    return c == 'i'; 
+bool is_bencoded_int(char c)
+{
+    return c == 'i';
 }
 
 /**
@@ -85,9 +98,11 @@ bool is_bencoded_int(char c) {
  *
  * @return A pointer to the newly allocated Bencoded data structure.
  */
-Bencoded* get_bencoded() {
+Bencoded *get_bencoded()
+{
     Bencoded *bcode = malloc(sizeof(Bencoded));
-    if (bcode == NULL) {
+    if (bcode == NULL)
+    {
         fprintf(stderr, "could not alloc memory for new bencode.");
         return NULL;
     };
@@ -95,37 +110,48 @@ Bencoded* get_bencoded() {
 };
 
 /**
+ * Frees memory allocated for a bencoded string
+ * @param b - the element to free.
+ */
+void free_bencoded_string(BencodedString b)
+{
+    free(b.chars);
+}
+
+/**
  * Frees the memory allocated for the elements of a Bencoded list.
  *
  * @param elements The elements of the list to free.
  * @param length The number of elements in the list.
  */
-void free_bencoded_list_elements(Bencoded* elements, size_t length) {
-    for (size_t i = 0; i < length; i++) 
+void free_bencoded_list_elements(Bencoded *elements, size_t length)
+{
+    for (size_t i = 0; i < length; i++)
     {
-        Bencoded el = elements[i];
-        if (el.type == STRING) 
-        {
-            free(el.data.string);
-        }
-
-        if (el.type == LIST) 
-        {
-            free_bencoded_list_elements(el.data.list.elements, el.data.list.size);
-        }
-
-        if (el.type == DICTIONARY) 
-        {
-            for (size_t j = 0; j < el.data.dictionary.size; j++) 
-            {
-                free(el.data.dictionary.elements[j].key);
-                free_bencoded(el.data.dictionary.elements[j].value);
-            }
-            free(el.data.dictionary.elements);
-        }
+        free_bencoded_inner(elements[i]);
     }
 
     free(elements);
+};
+
+/**
+ * Frees the memory allocated for a bencoded dict.
+ *
+ * @param elements The elements of the list to free.
+ * @param length The number of elements in the list.
+ */
+void free_bencoded_dict(Bencoded b)
+{
+    for (size_t i = 0; i < b.data.dictionary.size; i++)
+    {
+        // this isn't heap allocated.
+        free_bencoded_string(b.data.dictionary.elements[i].key);
+        // this is a pointer to a head alloc'd struct, so it needs to be free'd at both top and
+        // inner levels.
+        free_bencoded(b.data.dictionary.elements[i].value);
+    }
+
+    free(b.data.dictionary.elements);
 };
 
 /**
@@ -134,21 +160,21 @@ void free_bencoded_list_elements(Bencoded* elements, size_t length) {
  *
  * @param b The Bencoded data structure to free.
  */
-void free_bencoded_inner(Bencoded* b) {
-    if (b->type == STRING) {
-        free(b->data.string);
+void free_bencoded_inner(Bencoded b)
+{
+    if (b.type == STRING)
+    {
+        free_bencoded_string(b.data.string);
     };
 
-    if (b->type == LIST) {
-        free_bencoded_list_elements(b->data.list.elements, b->data.list.size);
+    if (b.type == LIST)
+    {
+        free_bencoded_list_elements(b.data.list.elements, b.data.list.size);
     };
 
-    if (b->type == DICTIONARY) {
-        for (size_t i = 0; i < b->data.dictionary.size; i++) {
-            free(b->data.dictionary.elements[i].key);
-            free_bencoded(b->data.dictionary.elements[i].value);
-        }
-        free(b->data.dictionary.elements);
+    if (b.type == DICTIONARY)
+    {
+        free_bencoded_dict(b);
     }
 };
 
@@ -157,77 +183,82 @@ void free_bencoded_inner(Bencoded* b) {
  *
  * @param b The Bencoded data structure to free.
  */
-void free_bencoded(Bencoded* b) {
-    free_bencoded_inner(b);
+void free_bencoded(Bencoded *b)
+{
+    free_bencoded_inner(*b);
     free(b);
 };
 
 /**
  * a decoding function takes a string to decode and the containter to decode it into. It will return a pointer to the new "head"
- * of the original stream it was parsing. for primitive types, if should end on a a null terminator.  
+ * of the original stream it was parsing. for primitive types, if should end on a a null terminator.
  * @param bencoded_string the string to decode.
  * @param container the container to decode the string into.
  * @return a pointer to the new head of the stream.
-*/
-const char* decode_bencoded_string(const char* bencoded_string, Bencoded* container) {
-        char *midptr;
-        // this should not fail considering we checked if it has a digit first.
-        long length = strtol(bencoded_string, &midptr, 10); 
-        if (midptr[0] == ':')
+ */
+const char *decode_bencoded_string(const char *bencoded_string, Bencoded *container)
+{
+    char *midptr;
+    // this should not fail considering we checked if it has a digit first.
+    long length = strtol(bencoded_string, &midptr, 10);
+    if (midptr[0] == ':')
+    {
+        const char *start_body = midptr + 1;
+        char *decoded_str = malloc(length + 1);
+        if (decoded_str == NULL)
         {
-            const char* start_body = midptr + 1;
-            char* decoded_str = malloc(length + 1);
-            if (decoded_str == NULL) 
-            {
-                fprintf(stderr, "ERR program out of heap memory (decoding string)");
-                exit(1);
-            }
-            strncpy(decoded_str, start_body, length);
-            decoded_str[length] = '\0';
-            container->data.string = decoded_str;
-            return start_body + length;
-        }
-        else
-        {
-            fprintf(stderr, "Invalid encoded value: %s\n", bencoded_string);
+            fprintf(stderr, "ERR program out of heap memory (decoding string)");
             exit(1);
         }
-
+        strncpy(decoded_str, start_body, length);
+        container->data.string.chars = decoded_str;
+        container->data.string.capacity = length;
+        container->data.string.size = length;
+        return start_body + length;
+    }
+    else
+    {
+        fprintf(stderr, "Invalid encoded value: %s\n", bencoded_string);
+        exit(1);
+    }
 }
 
 /**
  * a decoding function takes a string to decode and the containter to decode it into. It will return a pointer to the new "head"
- * of the original stream it was parsing. for primitive types, if should end on a a null terminator.  
+ * of the original stream it was parsing. for primitive types, if should end on a a null terminator.
  * @param bencoded_integer the string to decode.
  * @param container the container to decode the string into.
  * @return a pointer to the new head of the stream.
-*/
-const char* decode_bencoded_integer(const char* bencoded_integer, Bencoded* container) {
+ */
+const char *decode_bencoded_integer(const char *bencoded_integer, Bencoded *container)
+{
     char *endptr;
     long integer = strtol(bencoded_integer, &endptr, 10);
 
     // to-do: this needs to be more robust.
-    if (endptr == bencoded_integer || endptr[0] != 'e') {
+    if (endptr == bencoded_integer || endptr[0] != 'e')
+    {
         fprintf(stderr, "ERR conversion of integer failed. coverting %s\n", endptr);
         exit(1);
     };
 
     container->data.integer = integer;
-    return endptr + 1; 
+    return endptr + 1;
 }
 
 /**
  * a decoding function takes a string to decode and the containter to decode it into. It will return a pointer to the new "head"
  * of the original stream it was parsing. This function is specifically for decoding lists. It will return a pointer to the new "head"
- * It parses the list by recursively calling decode_bencode on each element in the list.  
+ * It parses the list by recursively calling decode_bencode on each element in the list.
  * @param bencoded_list the string to decode.
  * @param container the container to decode the string into.
  * @return a pointer to the new head of the stream.
-*/
-const char* decode_bencoded_list(const char* bencoded_list, Bencoded* container) {
+ */
+const char *decode_bencoded_list(const char *bencoded_list, Bencoded *container)
+{
     size_t capacity = 1024; // arbitrary default for now;
-    Bencoded* elements = malloc(sizeof(Bencoded) * capacity);
-    if (elements == NULL) 
+    Bencoded *elements = malloc(sizeof(Bencoded) * capacity);
+    if (elements == NULL)
     {
         fprintf(stderr, "ERR heap out of memory, decoding list -> %s\n", bencoded_list);
         exit(1);
@@ -235,12 +266,14 @@ const char* decode_bencoded_list(const char* bencoded_list, Bencoded* container)
     // setup the list for some pushing.
     size_t size = 0;
     // this feels really flimsy...
-    while(bencoded_list[0] != 'e' && bencoded_list[0] != '\0') {
+    while (bencoded_list[0] != 'e' && bencoded_list[0] != '\0')
+    {
         bencoded_list = decode_bencode(bencoded_list, &elements[size++]);
-        if (size == capacity) {
+        if (size == capacity)
+        {
             capacity *= 2;
             Bencoded *tmp = realloc(elements, capacity);
-            if (tmp == NULL) 
+            if (tmp == NULL)
             {
                 fprintf(stderr, "failed to resize the bencoded list\n");
                 exit(1);
@@ -249,7 +282,7 @@ const char* decode_bencoded_list(const char* bencoded_list, Bencoded* container)
         }
     }
 
-    if (bencoded_list[0] != 'e') 
+    if (bencoded_list[0] != 'e')
     {
         fprintf(stderr, "bencoded list terminated unexpectedly");
         exit(1);
@@ -264,36 +297,36 @@ const char* decode_bencoded_list(const char* bencoded_list, Bencoded* container)
 
 /**
  * a decoding function takes a string to decode and the containter to decode it into. It will return a pointer to the new "head"
- * of the original stream it was parsing. This function is specifically for decoding dictionaries. It will return a pointer to the new "head".  
+ * of the original stream it was parsing. This function is specifically for decoding dictionaries. It will return a pointer to the new "head".
  * @param bencoded_dict the string to decode.
  * @param container the container to decode the string into.
  * @return a pointer to the new head of the stream.
-*/
-const char* decode_bencoded_dictionary(const char* bencoded_dict, Bencoded* container) {
+ */
+const char *decode_bencoded_dictionary(const char *bencoded_dict, Bencoded *container)
+{
     size_t capacity = 1024;
-    BencodedDictElement* elements = malloc(sizeof(BencodedDictElement) * capacity);
-    if (elements == NULL) 
+    BencodedDictElement *elements = malloc(sizeof(BencodedDictElement) * capacity);
+    if (elements == NULL)
     {
         fprintf(stderr, "ERR heap out of memory, decoding dictionary -> %s\n", bencoded_dict);
         exit(1);
     }
     size_t size = 0;
 
-
-    while (bencoded_dict[0] != 'e' && bencoded_dict[0] != '\0') {
-        // the key container will be discarded after this loop.
-        // so no need to allocate dynamic memory for it.
+    while (bencoded_dict[0] != 'e' && bencoded_dict[0] != '\0')
+    {
+        // the key container will be copied into the key because it is a known size.
         Bencoded key_container;
         bencoded_dict = decode_bencode(bencoded_dict, &key_container);
-        if (key_container.type != STRING) 
+        if (key_container.type != STRING)
         {
             fprintf(stderr, "dictionary key is not a string");
             exit(1);
         }
 
-        // this, however, will be kept.
+        // this, however, is not known yet, so it must be heap alloc'd
         Bencoded *value_container = get_bencoded();
-        if (value_container == NULL) 
+        if (value_container == NULL)
         {
             fprintf(stderr, "ERR could not allocate memory for bencoded container\n");
             exit(1);
@@ -305,10 +338,11 @@ const char* decode_bencoded_dictionary(const char* bencoded_dict, Bencoded* cont
         elements[size].value = value_container;
         size++;
         // resize the dictionary if necessary.
-        if (size == capacity) {
+        if (size == capacity)
+        {
             capacity *= 2;
             BencodedDictElement *tmp = realloc(elements, capacity);
-            if (tmp == NULL) 
+            if (tmp == NULL)
             {
                 fprintf(stderr, "failed to resize the bencoded dictionary\n");
                 exit(1);
@@ -317,7 +351,7 @@ const char* decode_bencoded_dictionary(const char* bencoded_dict, Bencoded* cont
         }
     }
 
-    if (bencoded_dict[0] != 'e') 
+    if (bencoded_dict[0] != 'e')
     {
         fprintf(stderr, "bencoded dictionary terminated unexpectedly");
         exit(1);
@@ -331,14 +365,15 @@ const char* decode_bencoded_dictionary(const char* bencoded_dict, Bencoded* cont
 
 /**
  * This is the top level decoding function. It will take a string to decode and the container to decode it into. It will return a pointer to the new "head"
- * of the original stream it was parsing. It will call the appropriate decoding function based on the type of the bencoded value. 
+ * of the original stream it was parsing. It will call the appropriate decoding function based on the type of the bencoded value.
  * @param bencoded_value the string to decode.
  * @param container the container to decode the string into.
  * @return a pointer to the new head of the stream.
-*/
-const char* decode_bencode(const char* bencoded_value, Bencoded* container) {
+ */
+const char *decode_bencode(const char *bencoded_value, Bencoded *container)
+{
     // string
-    if (is_digit(bencoded_value[0])) 
+    if (is_digit(bencoded_value[0]))
     {
         // todo: run some checks on the char* returned here.
         container->type = STRING;
@@ -372,22 +407,28 @@ const char* decode_bencode(const char* bencoded_value, Bencoded* container) {
     }
 }
 
-size_t encode_string(Bencoded b, char* target)
+size_t encode_string(Bencoded b, char *target)
 {
     size_t nbytes = 0;
-    size_t length = strlen(b.data.string);
-    nbytes += sprintf(target, "%li:%s", length, b.data.string);
+    size_t length = b.data.string.size;
+    nbytes += sprintf(target, "%li", length, b.data.string);
+
+    for (size_t i = 0; i < length; i++)
+    {
+        target[nbytes++] = b.data.string.chars[i];
+    }
+
     return nbytes;
 }
 
-size_t encode_integer(Bencoded b, char* target)
+size_t encode_integer(Bencoded b, char *target)
 {
     size_t nbytes = 0;
     nbytes += sprintf(target, "i%lde", b.data.integer);
     return nbytes;
 }
 
-size_t encode_list(Bencoded b, char* target)
+size_t encode_list(Bencoded b, char *target)
 {
     size_t nbytes = 0;
     target[nbytes++] = 'l';
@@ -401,7 +442,7 @@ size_t encode_list(Bencoded b, char* target)
     return nbytes;
 }
 
-size_t encode_dict(Bencoded b, char *target) 
+size_t encode_dict(Bencoded b, char *target)
 {
     size_t nbytes = 0;
     target[nbytes++] = 'd';
@@ -420,14 +461,14 @@ size_t encode_dict(Bencoded b, char *target)
     return nbytes;
 }
 
-size_t route_bencode(Bencoded b, char* target)
+size_t route_bencode(Bencoded b, char *target)
 {
     if (b.type == STRING)
     {
         return encode_string(b, target);
     }
 
-    if (b.type == INTEGER) 
+    if (b.type == INTEGER)
     {
         return encode_integer(b, target);
     }
@@ -445,7 +486,7 @@ size_t route_bencode(Bencoded b, char* target)
     return 0;
 }
 
-size_t encode_bencode(Bencoded b, char* target)
+size_t encode_bencode(Bencoded b, char *target)
 {
     size_t nbytes = route_bencode(b, target);
     target[nbytes] = '\0';
@@ -456,8 +497,8 @@ size_t encode_bencode(Bencoded b, char* target)
  * Gets a key from a bencoded dictionary.
  * @param search_str - the key to look for.
  * @return a pointer to the value if the key is found, else null.
-*/
-Bencoded* get_dict_key(const char* search_str, Bencoded b)
+ */
+Bencoded *get_dict_key(const char *search_str, Bencoded b)
 {
     if (b.type != DICTIONARY)
     {
@@ -465,12 +506,12 @@ Bencoded* get_dict_key(const char* search_str, Bencoded b)
         return NULL;
     }
 
-    BencodedDictionary dict = b.data.dictionary; 
+    BencodedDictionary dict = b.data.dictionary;
     // for now perform a linear search through the keys until we find one matching;
     for (size_t i = 0; i < dict.size; i++)
     {
         BencodedDictElement el = dict.elements[i];
-        if (strcmp(search_str, el.key) == 0)
+        if (strcmp(search_str, el.key.chars) == 0)
         {
             return el.value;
         }
@@ -478,4 +519,24 @@ Bencoded* get_dict_key(const char* search_str, Bencoded b)
 
     // not found
     return NULL;
+}
+
+size_t bencode_strcmp(BencodedString s, char *cmp)
+{
+    unsigned char *s1 = s.chars;
+    unsigned char *s2 = cmp;
+    unsigned char c1, c2;
+
+    do
+    {
+        c1 = *s1++;
+        c2 = *s2++;
+
+        if (c2 == '\0' || s1 - s.chars == s.size - 1)
+        {
+            return c1 - c2;
+        }
+    } while (c1 == c2);
+
+    return c1 - c2;
 }

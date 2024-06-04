@@ -23,7 +23,7 @@ void print_torrent_meta(Bencoded torrent)
         exit(1);
     }
 
-    Bencoded* announce = get_dict_key("announce", torrent);
+    Bencoded *announce = get_dict_key("announce", torrent);
     if (announce == NULL)
     {
         fprintf(stderr, "ERR: 'announce' key not found in torrent meta");
@@ -39,13 +39,13 @@ void print_torrent_meta(Bencoded torrent)
     }
     print_info(*info);
 
-
     char buf[10000]; // known to be big enough for now.
     size_t size = encode_bencode(*info, buf);
     unsigned char hash[SHA_DIGEST_LENGTH];
-    SHA1((unsigned char*)buf, size, hash);
+    SHA1((unsigned char *)buf, size, hash);
     printf("Info Hash: ");
-    for (int i = 0; i < SHA_DIGEST_LENGTH; i++) {
+    for (int i = 0; i < SHA_DIGEST_LENGTH; i++)
+    {
         printf("%02x", hash[i]);
     }
     printf("\n");
@@ -54,7 +54,7 @@ void print_torrent_meta(Bencoded torrent)
 
 void print_tracker_url(Bencoded announce)
 {
-    if (announce.type != STRING) 
+    if (announce.type != STRING)
     {
         fprintf(stderr, "ERR: announce key is expected to be a string.");
         return;
@@ -82,9 +82,10 @@ void print_info(Bencoded info)
     printf("Length: %li\n", length->data.integer);
 }
 
-char* read_file(const char* path) {
+char *read_file(const char *path)
+{
     FILE *file = fopen(path, "r");
-    if (file == NULL) 
+    if (file == NULL)
     {
         fprintf(stderr, "unable to open file at: %s\n", path);
         return NULL;
@@ -102,7 +103,7 @@ char* read_file(const char* path) {
     }
 
     long nbytes = fread(contents, sizeof(char), size, file);
-    if (nbytes != size) 
+    if (nbytes != size)
     {
         fprintf(stderr, "ERR: number of bytes read differs from file size.");
     }
@@ -116,29 +117,32 @@ char* read_file(const char* path) {
  * @param argv An array of command-line arguments.
  * @return 0 if successful, 1 if there was an error.
  */
-int main(int argc, char* argv[]) {
-	// Disable output buffering
-	setbuf(stdout, NULL);
- 	setbuf(stderr, NULL);
+int main(int argc, char *argv[])
+{
+    // Disable output buffering
+    setbuf(stdout, NULL);
+    setbuf(stderr, NULL);
 
-    if (argc < 3) {
+    if (argc < 3)
+    {
         fprintf(stderr, "Usage: your_bittorrent.sh <command> <args>\n");
         return 1;
     }
 
-    const char* command = argv[1];
+    const char *command = argv[1];
 
-    if (strcmp(command, "decode") == 0) {
-        const char* encoded_str = argv[2];
+    if (strcmp(command, "decode") == 0)
+    {
+        const char *encoded_str = argv[2];
         Bencoded container;
-        const char* endstr = decode_bencode(encoded_str, &container);
+        const char *endstr = decode_bencode(encoded_str, &container);
         print_bencoded(container, true);
         free_bencoded_inner(&container);
     }
 
     else if (strcmp(command, "info") == 0)
     {
-        const char* torrent_path = argv[2];
+        const char *torrent_path = argv[2];
         const char *file_contents = read_file(torrent_path);
         Bencoded container;
         const char *endstr = decode_bencode(file_contents, &container);
