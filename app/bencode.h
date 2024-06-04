@@ -26,15 +26,13 @@ typedef struct Bencoded Bencoded;
 // binary safe immutable string.
 typedef struct
 {
-    size_t capacity;
     size_t size;
-    char *chars
+    char *chars;
 } BencodedString;
 
 // Separate struct for list data
 typedef struct
 {
-    size_t capacity;
     size_t size;
     Bencoded *elements;
 } BencodedList;
@@ -49,7 +47,6 @@ typedef struct
 // Separate struct for dictionary data
 typedef struct
 {
-    size_t capacity;
     size_t size;
     BencodedDictElement *elements;
 } BencodedDictionary;
@@ -70,8 +67,11 @@ struct Bencoded
 // Function prototypes
 void print_bencoded(Bencoded b, bool flush_output);
 Bencoded *get_bencoded();
-void free_bencoded(Bencoded *b);
-void free_bencoded_inner(Bencoded *b);
+// frees a struct that was heap alloc'd
+void free_bencoded(Bencoded *b); 
+// frees just the inner allocations if the struct was stack alloc'd or part
+// of an array.
+void free_bencoded_inner(Bencoded b);
 Bencoded *get_dict_key(const char *search_str, Bencoded b);
 const char *decode_bencode(const char *bencoded_value, Bencoded *container);
 size_t encode_bencode(Bencoded b, char *target);

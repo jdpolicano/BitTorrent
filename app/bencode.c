@@ -9,7 +9,7 @@
 #include "bencode.h"
 
 size_t route_bencode(Bencoded b, char *target);
-size_t bencode_strcmp(BencodedString s, char *cmp);
+int bencode_strcmp(BencodedString s, const char *cmp);
 
 /**
  * Prints the given Bencoded data structure.
@@ -29,7 +29,7 @@ void print_bencoded(Bencoded b, bool flush_output)
 
     case STRING:
     {
-        printf("\"%s\"", b.data.string);
+        printf("\"%.*s\"", (int)b.data.string.size, b.data.string.chars);
         break;
     }
 
@@ -41,7 +41,7 @@ void print_bencoded(Bencoded b, bool flush_output)
             print_bencoded(b.data.list.elements[i], false);
             if (i != b.data.list.size - 1)
             {
-                printf(", ");
+                printf(",");
             }
         }
         printf("]");
@@ -54,11 +54,11 @@ void print_bencoded(Bencoded b, bool flush_output)
         for (size_t i = 0; i < b.data.dictionary.size; i++)
         {
             BencodedDictElement el = b.data.dictionary.elements[i];
-            printf("\"%s\": ", el.key);
+            printf("\"%.*s\":", (int)el.key.size, el.key.chars);
             print_bencoded(*el.value, false);
             if (i != b.data.dictionary.size - 1)
             {
-                printf(", ");
+                printf(",");
             }
         }
         printf("}");
@@ -210,9 +210,8 @@ const char *decode_bencoded_string(const char *bencoded_string, Bencoded *contai
             fprintf(stderr, "ERR program out of heap memory (decoding string)");
             exit(1);
         }
-        strncpy(decoded_str, start_body, length);
+        memcpy(decoded_str, start_body, length);
         container->data.string.chars = decoded_str;
-        container->data.string.capacity = length;
         container->data.string.size = length;
         return start_body + length;
     }
@@ -265,8 +264,7 @@ const char *decode_bencoded_list(const char *bencoded_list, Bencoded *container)
     }
     // setup the list for some pushing.
     size_t size = 0;
-    // this feels really flimsy...
-    while (bencoded_list[0] != 'e' && bencoded_list[0] != '\0')
+    while (bencoded_list[0] != 'e')
     {
         bencoded_list = decode_bencode(bencoded_list, &elements[size++]);
         if (size == capacity)
@@ -282,14 +280,7 @@ const char *decode_bencoded_list(const char *bencoded_list, Bencoded *container)
         }
     }
 
-    if (bencoded_list[0] != 'e')
-    {
-        fprintf(stderr, "bencoded list terminated unexpectedly");
-        exit(1);
-    }
-
     container->data.list.size = size;
-    container->data.list.capacity = capacity;
     container->data.list.elements = elements;
 
     return bencoded_list + 1;
@@ -304,16 +295,16 @@ const char *decode_bencoded_list(const char *bencoded_list, Bencoded *container)
  */
 const char *decode_bencoded_dictionary(const char *bencoded_dict, Bencoded *container)
 {
-    size_t capacity = 1024;
+    size_t capacity = 64;
     BencodedDictElement *elements = malloc(sizeof(BencodedDictElement) * capacity);
     if (elements == NULL)
     {
         fprintf(stderr, "ERR heap out of memory, decoding dictionary -> %s\n", bencoded_dict);
         exit(1);
     }
-    size_t size = 0;
 
-    while (bencoded_dict[0] != 'e' && bencoded_dict[0] != '\0')
+    size_t size = 0;
+    while (bencoded_dict[0] != 'e')
     {
         // the key container will be copied into the key because it is a known size.
         Bencoded key_container;
@@ -335,6 +326,7 @@ const char *decode_bencoded_dictionary(const char *bencoded_dict, Bencoded *cont
 
         // push the key and value into the dictionary.
         elements[size].key = key_container.data.string;
+        // push the value into the dict.
         elements[size].value = value_container;
         size++;
         // resize the dictionary if necessary.
@@ -351,14 +343,7 @@ const char *decode_bencoded_dictionary(const char *bencoded_dict, Bencoded *cont
         }
     }
 
-    if (bencoded_dict[0] != 'e')
-    {
-        fprintf(stderr, "bencoded dictionary terminated unexpectedly");
-        exit(1);
-    }
-
     container->data.dictionary.size = size;
-    container->data.dictionary.capacity = capacity;
     container->data.dictionary.elements = elements;
     return bencoded_dict + 1;
 }
@@ -402,7 +387,7 @@ const char *decode_bencode(const char *bencoded_value, Bencoded *container)
 
     else
     {
-        fprintf(stderr, "Only strings + integers + lists are supported at the moment\nReceived: %s\n", bencoded_value);
+        fprintf(stderr, "Only strings + integers + lists + dicts are supported at the moment\nReceived: %s\n", bencoded_value);
         exit(1);
     }
 }
@@ -411,7 +396,7 @@ size_t encode_string(Bencoded b, char *target)
 {
     size_t nbytes = 0;
     size_t length = b.data.string.size;
-    nbytes += sprintf(target, "%li", length, b.data.string);
+    nbytes += sprintf(target, "%li:", length);
 
     for (size_t i = 0; i < length; i++)
     {
@@ -424,7 +409,7 @@ size_t encode_string(Bencoded b, char *target)
 size_t encode_integer(Bencoded b, char *target)
 {
     size_t nbytes = 0;
-    nbytes += sprintf(target, "i%lde", b.data.integer);
+    nbytes += sprintf(target, "i%lie", b.data.integer);
     return nbytes;
 }
 
@@ -511,7 +496,7 @@ Bencoded *get_dict_key(const char *search_str, Bencoded b)
     for (size_t i = 0; i < dict.size; i++)
     {
         BencodedDictElement el = dict.elements[i];
-        if (strcmp(search_str, el.key.chars) == 0)
+        if (bencode_strcmp(el.key, search_str) == 0)
         {
             return el.value;
         }
@@ -521,22 +506,35 @@ Bencoded *get_dict_key(const char *search_str, Bencoded b)
     return NULL;
 }
 
-size_t bencode_strcmp(BencodedString s, char *cmp)
+
+/**
+ * Compares a BencodedString to a C string.
+ * Since BencodedStrings are binary safe, this function will compare the two strings byte by byte.
+ * Bencoded strings do not have a null terminator, so the size of the BencodedString is used to determine the length of the string.
+ * We will iterate until the end of the BencodedString or the last character of the C string, whichever comes first.
+ * @param s - the BencodedString to compare.
+ * @param cmp - the C string to compare.
+ * @return 0 if the strings are equal, a negative number if s is less than cmp, a positive number if s is greater than cmp.
+*/
+
+int bencode_strcmp(BencodedString s, const char *cmp)
 {
-    unsigned char *s1 = s.chars;
-    unsigned char *s2 = cmp;
-    unsigned char c1, c2;
-
-    do
-    {
-        c1 = *s1++;
-        c2 = *s2++;
-
-        if (c2 == '\0' || s1 - s.chars == s.size - 1)
-        {
-            return c1 - c2;
+    size_t i = 0;
+    while (i < s.size && cmp[i] != '\0') {
+        if (s.chars[i] != cmp[i]) {
+            return (unsigned char)s.chars[i] - (unsigned char)cmp[i];
         }
-    } while (c1 == c2);
+        i++;
+    }
 
-    return c1 - c2;
+    // if we reached the end of the BencodedString
+    if (i == s.size) {
+        // if the C string is at the end also this will be 0
+        // if not, the BencodedString is less than the C string
+        // so we should return a negative number
+        return -1 * (unsigned char)cmp[i];
+    }
+    
+    // the only other case is that the C string is shorter than the BencodedString
+    return (unsigned char)s.chars[i];
 }

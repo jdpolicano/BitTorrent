@@ -60,7 +60,7 @@ void print_tracker_url(Bencoded announce)
         return;
     }
 
-    printf("Tracker URL: %s\n", announce.data.string);
+    printf("Tracker URL: %.*s\n", (int)announce.data.string.size, announce.data.string.chars);
 }
 
 void print_info(Bencoded info)
@@ -108,6 +108,7 @@ char *read_file(const char *path)
         fprintf(stderr, "ERR: number of bytes read differs from file size.");
     }
 
+    fclose(file);
     return contents;
 }
 
@@ -137,7 +138,7 @@ int main(int argc, char *argv[])
         Bencoded container;
         const char *endstr = decode_bencode(encoded_str, &container);
         print_bencoded(container, true);
-        free_bencoded_inner(&container);
+        free_bencoded_inner(container);
     }
 
     else if (strcmp(command, "info") == 0)
@@ -147,7 +148,7 @@ int main(int argc, char *argv[])
         Bencoded container;
         const char *endstr = decode_bencode(file_contents, &container);
         print_torrent_meta(container);
-        free_bencoded_inner(&container);
+        free_bencoded_inner(container);
     }
     else
     {
