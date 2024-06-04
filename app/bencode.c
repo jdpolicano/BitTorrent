@@ -210,6 +210,8 @@ const char *decode_bencoded_string(const char *bencoded_string, Bencoded *contai
             fprintf(stderr, "ERR program out of heap memory (decoding string)");
             exit(1);
         }
+        // this is potentially dangerous if the length is wrong, but I 
+        // don't know how to get around it.
         memcpy(decoded_str, start_body, length);
         container->data.string.chars = decoded_str;
         container->data.string.size = length;

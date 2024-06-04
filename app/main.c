@@ -13,7 +13,16 @@ void print_torrent_meta(Bencoded torrent);
 void print_tracker_url(Bencoded announce);
 void print_info(Bencoded info);
 void print_torrent_hash(Bencoded info);
+void print_hex(unsigned char *data, size_t size);
 char *read_file(const char *path);
+
+void print_hex(unsigned char *data, size_t size)
+{
+    for (int i = 0; i < size; i++)
+    {
+        printf("%02x", data[i]);
+    }
+}
 
 void print_torrent_meta(Bencoded torrent)
 {
@@ -32,23 +41,12 @@ void print_torrent_meta(Bencoded torrent)
     print_tracker_url(*announce);
 
     Bencoded *info = get_dict_key("info", torrent);
-    if (announce == NULL)
+    if (info == NULL)
     {
         fprintf(stderr, "ERR: 'info' key not found in torrent meta");
         return;
     }
     print_info(*info);
-
-    char buf[10000]; // known to be big enough for now.
-    size_t size = encode_bencode(*info, buf);
-    unsigned char hash[SHA_DIGEST_LENGTH];
-    SHA1((unsigned char *)buf, size, hash);
-    printf("Info Hash: ");
-    for (int i = 0; i < SHA_DIGEST_LENGTH; i++)
-    {
-        printf("%02x", hash[i]);
-    }
-    printf("\n");
     return;
 }
 
@@ -72,6 +70,11 @@ void print_info(Bencoded info)
     }
 
     Bencoded *length = get_dict_key("length", info);
+    if (length == NULL)
+    {
+        fprintf(stderr, "ERR: length key not found in info dict.");
+        return;
+    }
 
     if (length->type != INTEGER)
     {
@@ -80,6 +83,59 @@ void print_info(Bencoded info)
     }
 
     printf("Length: %li\n", length->data.integer);
+
+    // print the info hash
+    char buf[10000]; // known to be big enough for now.
+    size_t size = encode_bencode(info, buf);
+    unsigned char hash[SHA_DIGEST_LENGTH];
+    SHA1((unsigned char *)buf, size, hash);
+    printf("Info Hash: ");
+    print_hex(hash, SHA_DIGEST_LENGTH);
+    printf("\n");
+
+    // print piece length
+    Bencoded *piece_length = get_dict_key("piece length", info);
+    if (piece_length == NULL)
+    {
+        fprintf(stderr, "ERR: piece length key not found in info dict.");
+        return;
+    }
+
+    if (piece_length->type != INTEGER)
+    {
+        fprintf(stderr, "ERR: piece length key inside info expected to be an integer.");
+        return;
+    }
+
+    printf("Piece Length: %li\n", piece_length->data.integer);
+
+    // print the pieces
+    Bencoded *pieces = get_dict_key("pieces", info);
+    if (pieces == NULL)
+    {
+        fprintf(stderr, "ERR: pieces key not found in info dict.");
+        return;
+    }
+
+    if (pieces->type != STRING)
+    {
+        fprintf(stderr, "ERR: pieces key inside info expected to be a string.");
+        return;
+    }
+
+    if (pieces->data.string.size % SHA_DIGEST_LENGTH != 0)
+    {
+        fprintf(stderr, "ERR: pieces key inside info has invalid length.");
+        return;
+    }
+
+    printf("Piece Hashes:\n");
+
+    for(size_t i = 0; i < pieces->data.string.size; i += SHA_DIGEST_LENGTH)
+    {
+        print_hex((unsigned char *)pieces->data.string.chars + i, SHA_DIGEST_LENGTH);
+        printf("\n");
+    }
 }
 
 char *read_file(const char *path)
