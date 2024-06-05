@@ -12,6 +12,22 @@ size_t route_bencode(Bencoded b, char *target);
 int bencode_strcmp(BencodedString s, const char *cmp);
 
 /**
+ * given a str and length, checks for a specific character returning a boolean if found.
+ * @param stream - the byte stream to check.
+ * @param length - the length of the stream.
+ * @param c - the byte to look for.
+ * @return true if the character is a digit, false otherwise.
+*/
+bool stream_contains(const char* stream, size_t length, char c) {
+    for (size_t i = 0; i < length; i++) {
+        if (stream[i] == c) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
  * Prints the given Bencoded data structure.
  *
  * @param b The Bencoded data structure to print.
@@ -136,22 +152,18 @@ void free_bencoded_list_elements(Bencoded *elements, size_t length)
 
 /**
  * Frees the memory allocated for a bencoded dict.
- *
  * @param elements The elements of the list to free.
  * @param length The number of elements in the list.
  */
-void free_bencoded_dict(Bencoded b)
+void free_bencoded_dict_elements(BencodedDictElement *elements, size_t length)
 {
-    for (size_t i = 0; i < b.data.dictionary.size; i++)
+    for (size_t i = 0; i < length; i++)
     {
-        // this isn't heap allocated.
-        free_bencoded_string(b.data.dictionary.elements[i].key);
-        // this is a pointer to a head alloc'd struct, so it needs to be free'd at both top and
-        // inner levels.
-        free_bencoded(b.data.dictionary.elements[i].value);
+        free_bencoded_string(elements[i].key);
+        free_bencoded(elements[i].value);
     }
 
-    free(b.data.dictionary.elements);
+    free(elements);
 };
 
 /**
@@ -174,7 +186,7 @@ void free_bencoded_inner(Bencoded b)
 
     if (b.type == DICTIONARY)
     {
-        free_bencoded_dict(b);
+        free_bencoded_dict_elements(b.data.dictionary.elements, b.data.dictionary.size);
     }
 };
 
@@ -192,47 +204,81 @@ void free_bencoded(Bencoded *b)
 /**
  * a decoding function takes a string to decode and the containter to decode it into. It will return a pointer to the new "head"
  * of the original stream it was parsing. for primitive types, if should end on a a null terminator.
+ * It will return the number of bytes read. If 0 the caller should check for errors in errno.
  * @param bencoded_string the string to decode.
+ * @param stream_length - the length of the string to decode.
  * @param container the container to decode the string into.
- * @return a pointer to the new head of the stream.
+ * @return the amount of bytes read. 
  */
-const char *decode_bencoded_string(const char *bencoded_string, Bencoded *container)
+size_t decode_bencoded_string(const char *bencoded_string, size_t stream_length, Bencoded *container)
 {
+    size_t bytes_read = 0;
+    // this means that the stream starts with a digit but does not contain a colon.
+    // we should continue to read until we find a colon.
+    if (!stream_contains(bencoded_string, stream_length, ':'))
+    {
+        fprintf(stderr, "ERR: invalid bencoded string, no colon found\n");
+        errno = PARSER_ERR_PARTIAL;
+        return 0;
+    }
+
+    // now this should be guarrenteed to be a number.
     char *midptr;
-    // this should not fail considering we checked if it has a digit first.
-    long length = strtol(bencoded_string, &midptr, 10);
+    long parsed_length = strtol(bencoded_string, &midptr, 10);
+
     if (midptr[0] == ':')
     {
         const char *start_body = midptr + 1;
-        char *decoded_str = malloc(length + 1);
+        bytes_read += (start_body - bencoded_string);
+        // check if the length is valid.
+        if (stream_length - bytes_read < parsed_length)
+        {
+            fprintf(stderr, "ERR: string length will cause out of bounds read.\n");
+            errno = PARSER_ERR_PARTIAL;
+            return 0;
+        }
+        
+        char *decoded_str = malloc(sizeof(char) * parsed_length);
         if (decoded_str == NULL)
         {
             fprintf(stderr, "ERR program out of heap memory (decoding string)");
-            exit(1);
+            errno = PARSER_ERR_MEMORY;
+            return 0;
         }
-        // this is potentially dangerous if the length is wrong, but I 
-        // don't know how to get around it.
-        memcpy(decoded_str, start_body, length);
+    
+        memcpy(decoded_str, start_body, parsed_length);
+        bytes_read += parsed_length;
         container->data.string.chars = decoded_str;
-        container->data.string.size = length;
-        return start_body + length;
+        container->data.string.size = parsed_length;
+        return bytes_read;
     }
     else
     {
         fprintf(stderr, "Invalid encoded value: %s\n", bencoded_string);
-        exit(1);
+        errno = PARSER_ERR_SYNTAX; // unrecoverable.
+        return 0;
     }
 }
 
 /**
- * a decoding function takes a string to decode and the containter to decode it into. It will return a pointer to the new "head"
- * of the original stream it was parsing. for primitive types, if should end on a a null terminator.
- * @param bencoded_integer the string to decode.
- * @param container the container to decode the string into.
- * @return a pointer to the new head of the stream.
+ * This decoding function takes a bencoded string and a container to decode it into. 
+ * It returns the number of bytes read from the input string.
+ * For primitive types, it should end on a null terminator.
+ * 
+ * @param bencoded_string The bencoded string to decode.
+ * @param stream_length The length of the bencoded string.
+ * @param container The container to decode the string into.
+ * @return The number of bytes read from the input string. if 0 the caller should check for errors in errno.
  */
-const char *decode_bencoded_integer(const char *bencoded_integer, Bencoded *container)
+size_t decode_bencoded_integer(const char *bencoded_integer, size_t stream_length, Bencoded *container)
 {
+    if (!stream_contains(bencoded_integer, stream_length, 'e'))
+    {
+        fprintf(stderr, "ERR: invalid bencoded integer, no end found\n");
+        errno = PARSER_ERR_PARTIAL;
+        return 0;
+    }
+
     char *endptr;
     long integer = strtol(bencoded_integer, &endptr, 10);
 
@@ -240,43 +286,60 @@ const char *decode_bencoded_integer(const char *bencoded_integer, Bencoded *cont
     if (endptr == bencoded_integer || endptr[0] != 'e')
     {
         fprintf(stderr, "ERR conversion of integer failed. coverting %s\n", endptr);
-        exit(1);
+        errno = PARSER_ERR_SYNTAX;
+        return 0;
     };
 
     container->data.integer = integer;
-    return endptr + 1;
+    return (endptr + 1) - bencoded_integer; // the number of bytes read. 
 }
 
 /**
- * a decoding function takes a string to decode and the containter to decode it into. It will return a pointer to the new "head"
- * of the original stream it was parsing. This function is specifically for decoding lists. It will return a pointer to the new "head"
- * It parses the list by recursively calling decode_bencode on each element in the list.
+ * a decoding function takes a string to decode and the containter to decode it into.
+ * This function is specifically for decoding lists. It will return the number of bytes read.
+ * If 0 the caller should check for errors in errno.
  * @param bencoded_list the string to decode.
+ * @param stream_length the length of the string to decode.
  * @param container the container to decode the string into.
- * @return a pointer to the new head of the stream.
+ * @return the number of bytes read from the stream.
  */
-const char *decode_bencoded_list(const char *bencoded_list, Bencoded *container)
+size_t decode_bencoded_list(const char *bencoded_list, size_t stream_length, Bencoded *container)
 {
     size_t capacity = 1024; // arbitrary default for now;
+    size_t bytes_read = 0;
     Bencoded *elements = malloc(sizeof(Bencoded) * capacity);
     if (elements == NULL)
     {
-        fprintf(stderr, "ERR heap out of memory, decoding list -> %s\n", bencoded_list);
-        exit(1);
+        fprintf(stderr, "ERR heap out of memory, decoding list: %s\n", bencoded_list);
+        errno = PARSER_ERR_MEMORY;
+        return 0;
     }
     // setup the list for some pushing.
     size_t size = 0;
     while (bencoded_list[0] != 'e')
     {
-        bencoded_list = decode_bencode(bencoded_list, &elements[size++]);
+        // get the number of bytes read next.
+        size_t nbytes = decode_bencode(bencoded_list, stream_length, &elements[size++]);
+        if (nbytes == 0)
+        {
+            // errno should be set elsewhere.
+            free_bencoded_list_elements(elements, size); 
+            return 0;
+        }
+
+        bencoded_list += nbytes;
+        stream_length -= nbytes;
+        bytes_read += nbytes;
+
         if (size == capacity)
         {
             capacity *= 2;
-            Bencoded *tmp = realloc(elements, capacity);
+            Bencoded *tmp = realloc(elements, sizeof(Bencoded) * capacity);
             if (tmp == NULL)
             {
-                fprintf(stderr, "failed to resize the bencoded list\n");
-                exit(1);
+                free_bencoded_list_elements(elements, size);
+                errno = PARSER_ERR_MEMORY;
+                return 0;
             }
             elements = tmp;
         }
@@ -284,37 +347,67 @@ const char *decode_bencoded_list(const char *bencoded_list, Bencoded *container)
 
     container->data.list.size = size;
     container->data.list.elements = elements;
+  
+    if (bencoded_list[0] != 'e')
+    {
+        fprintf(stderr, "ERR: invalid bencoded list, no end found\n");
+        errno = PARSER_ERR_PARTIAL;
+        return 0;
+    }
+    else
+    {
+        // skip the 'e' character.
+        bytes_read += 1;
+    }
 
-    return bencoded_list + 1;
+    return bytes_read;
 }
 
 /**
- * a decoding function takes a string to decode and the containter to decode it into. It will return a pointer to the new "head"
- * of the original stream it was parsing. This function is specifically for decoding dictionaries. It will return a pointer to the new "head".
- * @param bencoded_dict the string to decode.
+ * a decoding function takes a string to decode and the containter to decode it into.
+ * This function is specifically for decoding dictonaries. It will return the number of bytes read.
+ * If 0 the caller should check for errors in errno.
+ * @param bencoded_list the string to decode.
+ * @param stream_length the length of the string to decode.
  * @param container the container to decode the string into.
- * @return a pointer to the new head of the stream.
+ * @return the number of bytes read from the stream.
  */
-const char *decode_bencoded_dictionary(const char *bencoded_dict, Bencoded *container)
+size_t decode_bencoded_dictionary(const char *bencoded_dict, size_t stream_length, Bencoded *container)
 {
-    size_t capacity = 64;
+    size_t capacity = 64; // arbitrary default for now;
     BencodedDictElement *elements = malloc(sizeof(BencodedDictElement) * capacity);
     if (elements == NULL)
     {
-        fprintf(stderr, "ERR heap out of memory, decoding dictionary -> %s\n", bencoded_dict);
-        exit(1);
+        fprintf(stderr, "ERR heap out of memory, decoding dictionary: %s\n", bencoded_dict);
+        errno = PARSER_ERR_MEMORY;
+        return 0;
     }
 
     size_t size = 0;
+    size_t bytes_read = 0;
     while (bencoded_dict[0] != 'e')
     {
         // the key container will be copied into the key because it is a known size.
         Bencoded key_container;
-        bencoded_dict = decode_bencode(bencoded_dict, &key_container);
-        if (key_container.type != STRING)
+        size_t nbytes_key = decode_bencode(bencoded_dict, stream_length, &key_container);
+        if (nbytes_key == 0)
+        {
+            free_bencoded_dict_elements(elements, size);
+            return 0;
+        }
+        else if (key_container.type != STRING)
         {
             fprintf(stderr, "dictionary key is not a string");
-            exit(1);
+            errno = PARSER_ERR_SYNTAX;
+            free_bencoded_inner(key_container);
+            free_bencoded_dict_elements(elements, size);
+            return 0; // unrecoverable.
+        }
+        else 
+        {
+            bytes_read += nbytes_key;
+            bencoded_dict += nbytes_key;
+            stream_length -= nbytes_key;
         }
 
         // this, however, is not known yet, so it must be heap alloc'd
@@ -322,9 +415,27 @@ const char *decode_bencoded_dictionary(const char *bencoded_dict, Bencoded *cont
         if (value_container == NULL)
         {
             fprintf(stderr, "ERR could not allocate memory for bencoded container\n");
-            exit(1);
+            errno = PARSER_ERR_MEMORY;
+            free_bencoded_inner(key_container);
+            free_bencoded_dict_elements(elements, size);
+            return 0;
         }
-        bencoded_dict = decode_bencode(bencoded_dict, value_container);
+
+        size_t nbytes_value = decode_bencode(bencoded_dict, stream_length, value_container);
+        if (nbytes_value == 0)
+        {
+            // errno should be set elsewhere.
+            free_bencoded_inner(key_container);
+            free_bencoded(value_container);
+            free_bencoded_dict_elements(elements, size);
+            return 0;
+        }
+        else 
+        {
+            bytes_read += nbytes_value;
+            bencoded_dict += nbytes_value;
+            stream_length -= nbytes_value;
+        }
 
         // push the key and value into the dictionary.
         elements[size].key = key_container.data.string;
@@ -335,11 +446,15 @@ const char *decode_bencoded_dictionary(const char *bencoded_dict, Bencoded *cont
         if (size == capacity)
         {
             capacity *= 2;
-            BencodedDictElement *tmp = realloc(elements, capacity);
+            BencodedDictElement *tmp = realloc(elements, sizeof(BencodedDictElement) * capacity);
             if (tmp == NULL)
             {
                 fprintf(stderr, "failed to resize the bencoded dictionary\n");
-                exit(1);
+                errno = PARSER_ERR_MEMORY;
+                free_bencoded_inner(key_container);
+                free_bencoded(value_container);
+                free_bencoded_dict_elements(elements, size);
+                return 0;
             }
             elements = tmp;
         }
@@ -347,7 +462,7 @@ const char *decode_bencoded_dictionary(const char *bencoded_dict, Bencoded *cont
 
     container->data.dictionary.size = size;
     container->data.dictionary.elements = elements;
-    return bencoded_dict + 1;
+    return bytes_read;
 }
 
 /**
@@ -357,40 +472,56 @@ const char *decode_bencoded_dictionary(const char *bencoded_dict, Bencoded *cont
  * @param container the container to decode the string into.
  * @return a pointer to the new head of the stream.
  */
-const char *decode_bencode(const char *bencoded_value, Bencoded *container)
+size_t decode_bencode(const char *bencoded_value, size_t stream_length, Bencoded *container)
 {
+    if (stream_length <= 0)
+    {
+        fprintf(stderr, "ERR: invalid bencoded value, no end found\n");
+        errno = PARSER_ERR_PARTIAL;
+        return 0;
+    };
+
     // string
     if (is_digit(bencoded_value[0]))
     {
-        // todo: run some checks on the char* returned here.
         container->type = STRING;
-        return decode_bencoded_string(bencoded_value, container);
+        return decode_bencoded_string(bencoded_value, stream_length, container);
     }
 
     else if (is_bencoded_int(bencoded_value[0]))
     {
-        // todo: run some checks on the char* returned here.
         container->type = INTEGER;
-        return decode_bencoded_integer(bencoded_value + 1, container);
+        stream_length--;
+        bencoded_value++;
+        size_t nbytes = decode_bencoded_integer(bencoded_value, stream_length, container);
+        return nbytes == 0 ? 0 : nbytes + 1;
     }
 
     else if (bencoded_value[0] == 'l')
     {
         // todo: run some checks on the char* returned here.
         container->type = LIST;
-        return decode_bencoded_list(bencoded_value + 1, container);
+        stream_length--;
+        bencoded_value++;
+        size_t nbytes = decode_bencoded_list(bencoded_value, stream_length, container);
+        return nbytes == 0 ? 0 : nbytes + 1;
     }
 
     else if (bencoded_value[0] == 'd')
     {
         container->type = DICTIONARY;
-        return decode_bencoded_dictionary(bencoded_value + 1, container);
+        stream_length--;
+        bencoded_value++;
+        size_t nbytes = decode_bencoded_dictionary(bencoded_value, stream_length, container);
+        return nbytes == 0 ? 0 : nbytes + 1;
     }
 
     else
     {
-        fprintf(stderr, "Only strings + integers + lists + dicts are supported at the moment\nReceived: %s\n", bencoded_value);
-        exit(1);
+        fprintf(stderr, "Only strings + integers + lists + dicts are supported at the moment\n");
+        fprintf(stderr, "Received: %.*s\n", (int)stream_length, bencoded_value);
+        errno = PARSER_ERR_SYNTAX;
+        return 0;
     }
 }
 

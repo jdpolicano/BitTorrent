@@ -8,13 +8,20 @@
  */
 #include "bencode.h"
 #include <openssl/sha.h>
+#include <curl/curl.h>
+
+typedef struct {
+    size_t size;
+    char *content;
+} FILE_CONTENT;
+
 
 void print_torrent_meta(Bencoded torrent);
 void print_tracker_url(Bencoded announce);
 void print_info(Bencoded info);
 void print_torrent_hash(Bencoded info);
 void print_hex(unsigned char *data, size_t size);
-char *read_file(const char *path);
+FILE_CONTENT read_file(const char *path);
 
 void print_hex(unsigned char *data, size_t size)
 {
@@ -138,34 +145,40 @@ void print_info(Bencoded info)
     }
 }
 
-char *read_file(const char *path)
+FILE_CONTENT read_file(const char *path)
 {
+    FILE_CONTENT content = {0};
+
     FILE *file = fopen(path, "r");
     if (file == NULL)
     {
         fprintf(stderr, "unable to open file at: %s\n", path);
-        return NULL;
+        return content;
     }
 
     fseek(file, 0, SEEK_END);
     long size = ftell(file);
     fseek(file, 0, SEEK_SET);
 
-    char *contents = malloc(size + 1);
-    if (contents == NULL)
+    char *data = malloc(size + 1);
+    if (data == NULL)
     {
         fprintf(stderr, "ERR: failed to alloc buffer for file contents");
-        return contents; // NULL;
+        return content; // NULL;
     }
 
-    long nbytes = fread(contents, sizeof(char), size, file);
+    long nbytes = fread(data, sizeof(char), size, file);
     if (nbytes != size)
     {
         fprintf(stderr, "ERR: number of bytes read differs from file size.");
+        return content; // NULL;
     }
 
+    content.size = size;
+    content.content = data;
     fclose(file);
-    return contents;
+
+    return content;
 }
 
 /**
@@ -191,18 +204,30 @@ int main(int argc, char *argv[])
     if (strcmp(command, "decode") == 0)
     {
         const char *encoded_str = argv[2];
+        size_t len = strlen(encoded_str);
+        printf("Decoding bencoded string: %s\n", encoded_str);
         Bencoded container;
-        const char *endstr = decode_bencode(encoded_str, &container);
+        size_t nbytes = decode_bencode(encoded_str, len, &container);
+        printf("Decoded %zu bytes\n", nbytes);
+        if (nbytes == 0)
+        {
+            fprintf(stderr, "Failed to decode bencoded string\n");
+            return 1;
+        }
         print_bencoded(container, true);
-        free_bencoded_inner(container);
+        // free_bencoded_inner(container);
     }
 
     else if (strcmp(command, "info") == 0)
     {
         const char *torrent_path = argv[2];
-        const char *file_contents = read_file(torrent_path);
+        FILE_CONTENT file_contents = read_file(torrent_path);
+        if (file_contents.content == NULL || file_contents.size == 0)
+        {
+            return 1;
+        }
         Bencoded container;
-        const char *endstr = decode_bencode(file_contents, &container);
+        size_t nbytes = decode_bencode(file_contents.content, file_contents.size, &container);
         print_torrent_meta(container);
         free_bencoded_inner(container);
     }
