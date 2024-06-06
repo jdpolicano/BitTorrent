@@ -650,6 +650,8 @@ int main(int argc, char *argv[])
         FILE_CONTENT file_contents = read_file(torrent_path);
         if (file_contents.content == NULL || file_contents.size == 0)
         {
+            fprintf(stderr, "ERR: failed to read file contents\n");
+            fprintf(stderr, "torrent path %s\n", torrent_path);
             return 1;
         }
         Bencoded container;
