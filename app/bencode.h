@@ -57,10 +57,11 @@ typedef struct
     BencodedDictElement *elements;
 } BencodedDictionary;
 
-// Bencoded struct using separate inner structs
+// Bencoded struct from parsing a Bencoded string. The structs for creating a Bencoded string are separate.
 struct Bencoded
 {
     BType type;
+    long encoded_length;
     union
     {
         BencodedString string;
