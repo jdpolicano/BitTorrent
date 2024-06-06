@@ -61,61 +61,61 @@ bool stream_contains(const char* stream, size_t length, char c) {
 
 /**
  * Prints the given Bencoded data structure.
- *
+ * @param fd The file descriptor to print to.
  * @param b The Bencoded data structure to print.
  * @param flush_output If true, flushes the output after printing.
  */
-void print_bencoded(Bencoded b, bool flush_output)
+void print_bencoded(FILE* fd, Bencoded b, bool flush_output)
 {
     switch (b.type)
     {
         case INTEGER:
         {
-            printf("%ld", b.data.integer);
+            fprintf(fd, "%ld", b.data.integer);
             break;
         }
 
         case STRING:
         {
-            printf("\"%.*s\"", (int)b.data.string.size, b.data.string.chars);
+            fprintf(fd, "\"%.*s\"", (int)b.data.string.size, b.data.string.chars);
             break;
         }
 
         case LIST:
         {
-            printf("[");
+            fprintf(fd, "[");
             for (size_t i = 0; i < b.data.list.size; i++)
             {
-                print_bencoded(b.data.list.elements[i], false);
+                print_bencoded(fd, b.data.list.elements[i], false);
                 if (i != b.data.list.size - 1)
                 {
-                    printf(",");
+                    fprintf(fd, ",");
                 }
             }
-            printf("]");
+            fprintf(fd, "]");
             break;
         }
 
         case DICTIONARY:
         {
-            printf("{");
+            fprintf(fd, "{");
             for (size_t i = 0; i < b.data.dictionary.size; i++)
             {
                 BencodedDictElement el = b.data.dictionary.elements[i];
-                printf("\"%.*s\":", (int)el.key.size, el.key.chars);
-                print_bencoded(*el.value, false);
+                fprintf(fd, "\"%.*s\":", (int)el.key.size, el.key.chars);
+                print_bencoded(fd, *el.value, false);
                 if (i != b.data.dictionary.size - 1)
                 {
-                    printf(",");
+                    fprintf(fd, ",");
                 }
             }
-            printf("}");
+            fprintf(fd, "}");
         }
     }
 
     if (flush_output)
     {
-        printf("\n");
+        fprintf(fd, "\n");
     }
 }
 

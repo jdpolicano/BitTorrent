@@ -72,7 +72,7 @@ struct Bencoded
 };
 
 // Function prototypes
-void print_bencoded(Bencoded b, bool flush_output);
+void print_bencoded(FILE* fd, Bencoded b, bool flush_output);
 Bencoded *get_bencoded();
 // frees a struct that was heap alloc'd
 void free_bencoded(Bencoded *b); 

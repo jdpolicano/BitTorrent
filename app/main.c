@@ -204,12 +204,14 @@ void get_tracker_response(Bencoded torrent)
 
     if (curl)
     {
+        fprintf(stderr, "URL: %s\n", url_struct->data);
+
         curl_easy_setopt(curl, CURLOPT_URL, url_struct->data);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, handle_data);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, response_aggregator);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_aggregator);
 
         res = curl_easy_perform(curl);
-        
+
         if (res != CURLE_OK)
         {
             fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
@@ -224,7 +226,6 @@ static size_t handle_data(void *contents, size_t size, size_t nmemb, void *userp
 {
     size_t realsize = size * nmemb;
     RESPONSE *mem = (RESPONSE *)userp;
-
     if (mem->size + realsize > mem->capacity)
     {
         unsigned char *ptr = realloc(mem->response, mem->size + realsize);
@@ -241,12 +242,18 @@ static size_t handle_data(void *contents, size_t size, size_t nmemb, void *userp
     memcpy(&(mem->response[mem->size]), contents, realsize);
     mem->size += realsize;
 
+
     Bencoded container;
     size_t nbytes = decode_bencode((const char*)mem->response, mem->size, &container);
 
-    if (nbytes == 0 && (errno == PARSER_ERR_MEMORY || errno == PARSER_ERR_SYNTAX))
+    if (nbytes == 0)
     {
-        return 0;
+        if (errno == PARSER_ERR_MEMORY || errno == PARSER_ERR_SYNTAX)
+        {
+            return 0;
+        }
+
+        return realsize;
     }
 
     handle_bencoded_response(container);
@@ -625,7 +632,7 @@ int main(int argc, char *argv[])
             fprintf(stderr, "Failed to decode bencoded string\n");
             return 1;
         }
-        print_bencoded(container, true);
+        print_bencoded(stdout, container, true);
         free_bencoded_inner(container);
     }
 
@@ -646,7 +653,6 @@ int main(int argc, char *argv[])
     else if (strcmp(command, "peers") == 0)
     {
         const char *torrent_path = argv[2];
-        fprintf(stderr, "torrent path %s\n", torrent_path);
         FILE_CONTENT file_contents = read_file(torrent_path);
         if (file_contents.content == NULL || file_contents.size == 0)
         {
