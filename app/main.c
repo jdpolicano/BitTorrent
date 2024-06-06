@@ -646,6 +646,7 @@ int main(int argc, char *argv[])
     else if (strcmp(command, "peers") == 0)
     {
         const char *torrent_path = argv[2];
+        fprintf(stderr, "torrent path %s\n", torrent_path);
         FILE_CONTENT file_contents = read_file(torrent_path);
         if (file_contents.content == NULL || file_contents.size == 0)
         {
