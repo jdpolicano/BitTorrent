@@ -80,14 +80,15 @@ void get_tracker_response(Bencoded torrent)
         return;
     }
 
-    printf("Escaped Hash: %s\n", escaped_hash);
     // set query param "info_hash" to the SHA1 hash of the info dictionary
     if (url_append_query_param(url, "info_hash", escaped_hash) != URL_SUCCESS)
     {
         fprintf(stderr, "ERR: failed to append query param info_hash");
         url_free(url);
+        curl_free(escaped_hash);
         return;
     }
+    curl_free(escaped_hash);
 
     // set query param "peer_id" to a unique identifier
     if (url_append_query_param(url, "peer_id", "00112233445566778899") != URL_SUCCESS)
@@ -158,13 +159,10 @@ void get_tracker_response(Bencoded torrent)
     CURLcode res;
     RESPONSE response_aggregator = {0};
     response_aggregator.data = bstring_new(1024);
-
-    fprintf(stderr, "Response Aggregator: %p\n", response_aggregator.data);
-
     if (response_aggregator.data == NULL)
     {
         
-        fprintf(stderr, "ERR: length key not found in info dict.");fprintf(stderr, "ERR: failed to allocate memory for response aggregator");
+        fprintf(stderr, "ERR: could not alloc memory for response_aggregator.data.");
         url_free(url);
         return;
     }
@@ -187,6 +185,8 @@ void get_tracker_response(Bencoded torrent)
         }
 
         curl_easy_cleanup(curl);
+        url_free(url);
+        bstring_free(response_aggregator.data);
     }
 }
 
@@ -195,7 +195,6 @@ static size_t handle_data(void *contents, size_t size, size_t nmemb, void *userp
 {
     size_t realsize = size * nmemb;
     RESPONSE *mem = (RESPONSE *)userp;
-    // 
     if (bstring_append_bytes(mem->data, contents, realsize) != BSTRING_SUCCESS)
     {
         fprintf(stderr, "ERR: failed to append data to response aggregator");
@@ -204,7 +203,6 @@ static size_t handle_data(void *contents, size_t size, size_t nmemb, void *userp
 
     Bencoded container;
     size_t nbytes = decode_bencode((const char*)mem->data->chars, mem->data->size, &container);
-
     if (nbytes == 0)
     {
         if (errno == PARSER_ERR_MEMORY || errno == PARSER_ERR_SYNTAX)
@@ -216,6 +214,7 @@ static size_t handle_data(void *contents, size_t size, size_t nmemb, void *userp
     }
 
     handle_bencoded_response(container);
+    free_bencoded_inner(container);
     return realsize;
 }
 
