@@ -7,8 +7,12 @@
  * The decoded value is then printed to the console.
  */
 #include "bencode.h"
+#include "url.h"
+#include "bstring.h"
+#include "bstring.h"
 #include <openssl/sha.h>
 #include <curl/curl.h>
+#include <stdlib.h>
 
 typedef struct {
     size_t size;
@@ -16,23 +20,9 @@ typedef struct {
 } FILE_CONTENT;
 
 typedef struct {
-    size_t size;
-    size_t capacity;
-    unsigned char *response;
+    BString *data; 
 } RESPONSE;
 
-typedef struct {
-    size_t size;
-    size_t capacity;
-    bool contains_query;
-    char *data;
-} URL;
-
-// url handling functions
-URL *get_url();
-void free_url(URL *url);
-bool set_url(const char *new_url, URL *url);
-bool append_query_param(const char *key, size_t key_size, const char *value, size_t value_size, URL *url);
 // print functions
 void print_tracker_url(Bencoded announce);
 void print_info(Bencoded info);
@@ -47,13 +37,6 @@ void handle_bencoded_response(Bencoded response);
 
 void get_tracker_response(Bencoded torrent)
 {
-    URL *url_struct = get_url();
-
-    if (url_struct == NULL)
-    {
-        return;
-    }
-    
     Bencoded *announce = get_dict_key("announce", torrent);
     if (announce == NULL)
     {
@@ -61,11 +44,13 @@ void get_tracker_response(Bencoded torrent)
         return;
     }
 
-    const char *url = (const char *)announce->data.string.chars;
+    const char *tracker_url = (const char *)announce->data.string.chars;
+    size_t size = announce->data.string.size;
 
-    if (!set_url(url, url_struct))
+    URL *url = url_new(tracker_url, size);
+    if (url == NULL)
     {
-        free_url(url_struct);
+        fprintf(stderr, "ERR: failed to create URL object\n");
         return;
     }
 
@@ -73,8 +58,9 @@ void get_tracker_response(Bencoded torrent)
     Bencoded *info = get_dict_key("info", torrent);
     if (info == NULL)
     {
-        fprintf(stderr, "ERR: 'info' key not found in torrent meta");
-        free_url(url_struct);
+        
+        fprintf(stderr, "ERR: length key not found in info dict.");
+        url_free(url);
         return;
     }
 
@@ -82,7 +68,7 @@ void get_tracker_response(Bencoded torrent)
     if (!hash_bencoded(hash, *info))
     {
         fprintf(stderr, "ERR: failed to hash bencoded info");
-        free_url(url_struct);
+        url_free(url);
         return;
     }  
 
@@ -90,65 +76,48 @@ void get_tracker_response(Bencoded torrent)
     if (escaped_hash == NULL)
     {
         fprintf(stderr, "ERR: failed to escape hash");
-        free_url(url_struct);
+        url_free(url);
         return;
     }
 
-    char *hash_key = "info_hash";
-    size_t hash_key_size = strlen(hash_key);
-    size_t escaped_hash_size = strlen(escaped_hash);
-
-    if (!append_query_param(hash_key, hash_key_size, escaped_hash, escaped_hash_size, url_struct))
+    printf("Escaped Hash: %s\n", escaped_hash);
+    // set query param "info_hash" to the SHA1 hash of the info dictionary
+    if (url_append_query_param(url, "info_hash", escaped_hash) != URL_SUCCESS)
     {
-        free_url(url_struct);
+        fprintf(stderr, "ERR: failed to append query param info_hash");
+        url_free(url);
         return;
     }
 
     // set query param "peer_id" to a unique identifier
-    char *peer_id_key = "peer_id";
-    size_t peer_id_key_size = strlen(peer_id_key);
-    char *peer_id = "00112233445566778899";
-    size_t peer_id_size = strlen(peer_id);
-
-    if (!append_query_param(peer_id_key, peer_id_key_size, peer_id, peer_id_size, url_struct))
+    if (url_append_query_param(url, "peer_id", "00112233445566778899") != URL_SUCCESS)
     {
-        free_url(url_struct);
+        fprintf(stderr, "ERR: failed to append query param peer_id");
+        url_free(url);
         return;
     }
 
     // set query param "port" to the port the client is listening on
-    char *port_key = "port";
-    size_t port_key_size = strlen(port_key);
-    char *port = "6881";
-    size_t port_size = strlen(port);
-
-    if (!append_query_param(port_key, port_key_size, port, port_size, url_struct))
+    if (url_append_query_param(url, "port", "6881") != URL_SUCCESS)
     {
-        free_url(url_struct);
+        fprintf(stderr, "ERR: failed to append query param port");
+        url_free(url);
         return;
     }
 
     // set query param "uploaded" to the number of bytes uploaded
-    char *uploaded_key = "uploaded";
-    size_t uploaded_key_size = strlen(uploaded_key);
-    char *uploaded = "0";
-    size_t uploaded_size = strlen(uploaded);
-
-    if (!append_query_param(uploaded_key, uploaded_key_size, uploaded, uploaded_size, url_struct))
+    if (url_append_query_param(url, "uploaded", "0") != URL_SUCCESS)
     {
-        free_url(url_struct);
+        fprintf(stderr, "ERR: failed to append query param uploaded");
+        url_free(url);
         return;
-    }
+    }   
 
     // set query param "downloaded" to the number of bytes downloaded
-    char *downloaded_key = "downloaded";
-    size_t downloaded_key_size = strlen(downloaded_key);
-    char *downloaded = "0";
-    size_t downloaded_size = strlen(downloaded);
-
-    if (!append_query_param(downloaded_key, downloaded_key_size, downloaded, downloaded_size, url_struct))
+    if (url_append_query_param(url, "downloaded", "0") != URL_SUCCESS)
     {
-        free_url(url_struct);
+        fprintf(stderr, "ERR: failed to append query param downloaded");
+        url_free(url);
         return;
     }
 
@@ -156,57 +125,57 @@ void get_tracker_response(Bencoded torrent)
     if (length == NULL)
     {
         fprintf(stderr, "ERR: length key not found in info dict.");
-        free_url(url_struct);
+        url_free(url);
         return;
     }
 
     char *length_str = malloc(sizeof(char) * length->encoded_length); // this should be guaranteed to be enough
     if (length_str == NULL)
     {
-        fprintf(stderr, "ERR: failed to allocate memory for length string");
-        free_url(url_struct);
+        
+        fprintf(stderr, "ERR: could not allocate memory for length_str.");
+        url_free(url);
         return;
     }
 
     sprintf(length_str, "%li", length->data.integer);
 
-    // set query param "left" to the number of bytes left to download
-    char *left_key = "left";
-    size_t left_key_size = strlen(left_key);
-    size_t length_str_size = strlen(length_str);
-
-    if (!append_query_param(left_key, left_key_size, length_str, length_str_size, url_struct))
+    if (url_append_query_param(url, "left", length_str) != URL_SUCCESS)
     {
-        free_url(url_struct);
+        fprintf(stderr, "ERR: could not append query param left.");
+        url_free(url);
         return;
     }
 
-    char *compact_key = "compact";
-    size_t compact_key_size = strlen(compact_key);
-    char *compact = "1";
-    size_t compact_size = strlen(compact);
-
-    if (!append_query_param(compact_key, compact_key_size, compact, compact_size, url_struct))
+    if (url_append_query_param(url, "compact", "1") != URL_SUCCESS)
     {
-        free_url(url_struct);
+        fprintf(stderr, "ERR: could not append query param compact.");
+        url_free(url);
         return;
     }
 
     CURL *curl;
     CURLcode res;
-    unsigned char *response_data = malloc(sizeof(char) * 1024); // arbitrary size for now.
     RESPONSE response_aggregator = {0};
-    response_aggregator.response = response_data;
-    response_aggregator.size = 0;
-    response_aggregator.capacity = 1024;
+    response_aggregator.data = bstring_new(1024);
+
+    fprintf(stderr, "Response Aggregator: %p\n", response_aggregator.data);
+
+    if (response_aggregator.data == NULL)
+    {
+        
+        fprintf(stderr, "ERR: length key not found in info dict.");fprintf(stderr, "ERR: failed to allocate memory for response aggregator");
+        url_free(url);
+        return;
+    }
 
     curl = curl_easy_init();
 
     if (curl)
     {
-        fprintf(stderr, "URL: %s\n", url_struct->data);
+        char* url_str = bstring_to_cstr(url->data);
 
-        curl_easy_setopt(curl, CURLOPT_URL, url_struct->data);
+        curl_easy_setopt(curl, CURLOPT_URL, url_str);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, handle_data);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_aggregator);
 
@@ -226,25 +195,15 @@ static size_t handle_data(void *contents, size_t size, size_t nmemb, void *userp
 {
     size_t realsize = size * nmemb;
     RESPONSE *mem = (RESPONSE *)userp;
-    if (mem->size + realsize > mem->capacity)
+    // 
+    if (bstring_append_bytes(mem->data, contents, realsize) != BSTRING_SUCCESS)
     {
-        unsigned char *ptr = realloc(mem->response, mem->size + realsize);
-        if (ptr == NULL)
-        {
-            fprintf(stderr, "ERR: not enough memory (realloc returned NULL)\n");
-            return 0;
-        }
-
-        mem->response = ptr;
-        mem->capacity = mem->size + realsize;
+        fprintf(stderr, "ERR: failed to append data to response aggregator");
+        return 0;
     }
 
-    memcpy(&(mem->response[mem->size]), contents, realsize);
-    mem->size += realsize;
-
-
     Bencoded container;
-    size_t nbytes = decode_bencode((const char*)mem->response, mem->size, &container);
+    size_t nbytes = decode_bencode((const char*)mem->data->chars, mem->data->size, &container);
 
     if (nbytes == 0)
     {
@@ -321,110 +280,6 @@ void handle_bencoded_response(Bencoded b)
         }
     }
 }
-
-/**
- * @brief alloc a new url struct.
- * @return a new URL struct or NULL if an error occurred.
-*/
-URL *get_url()
-{
-    URL *url = malloc(sizeof(URL));
-    if (url == NULL)
-    {
-        fprintf(stderr, "ERR: failed to allocate memory for URL");
-        return NULL;
-    }
-    url->size = 0;
-    url->capacity = 1000;
-    url->data = malloc(url->capacity);
-    if (url->data == NULL)
-    {
-        fprintf(stderr, "ERR: failed to allocate memory for URL data");
-        free(url);
-        return NULL;
-    }
-    return url;
-}
-
-/**
- * @brief free a URL struct.
- * @param url The URL struct to free.
-*/
-void free_url(URL *url)
-{
-    free(url->data);
-    free(url);
-}
-
-/**
- * @brief set the URL struct to a new URL.
- * Note: urls are not binary safe, so no size is passed here.
- * @param url The URL struct to set.
- * @param new_url The new URL to set.
- * @param new_url_size The size of the new URL.
- * @return true if successful, false if an error occurred.
-*/
-
-bool set_url(const char *new_url, URL *url)
-{
-    size_t new_url_size = strlen(new_url);
-    if (new_url_size > url->capacity)
-    {
-        char *new_data = realloc(url->data, new_url_size);
-        if (new_data == NULL)
-        {
-            fprintf(stderr, "ERR: failed to allocate memory for new URL");
-            return false;
-        }
-        url->data = new_data;
-        url->capacity = new_url_size;
-    }
-    memcpy(url->data, new_url, new_url_size);
-    url->size = new_url_size;
-    return true;
-}
-
-/**
- * binary safe appender for a url with query parameters.
- * @brief Append a query parameter to a URL.
- * @param key The key of the query parameter.
- * @param key_size The size of the key.
- * @param value The value of the query parameter.
- * @param value_size The size of the value.
- * @param url The URL struct to append the query parameter to.
- * @return true if successful, false if an error occurred.
-*/
-bool append_query_param(const char* key, size_t key_size, const char* value, size_t value_size, URL *url)
-{
-    if (!url->contains_query)
-    {
-        url->data[url->size++] = '?';
-        url->contains_query = true;
-    }
-
-    size_t new_size = url->size + key_size + value_size + 2; // 2 for '=' and '?'
-    if (new_size > url->capacity)
-    {
-        size_t new_capacity = url->capacity * 2 > new_size ? url->capacity * 2 : new_size;
-        char *new_data = realloc(url->data, url->capacity * 2);
-        if (new_data == NULL)
-        {
-            fprintf(stderr, "ERR: failed to allocate memory for query params");
-            return false;
-        }
-        url->data = new_data;
-        url->capacity = new_capacity;
-    }
-
-    memcpy(url->data + url->size, key, key_size);
-    url->size += key_size;
-    url->data[url->size++] = '=';
-    memcpy(url->data + url->size, value, value_size);
-    url->size += value_size;
-    url->data[url->size++] = '&';
-    return true;
-}
-
 
 void print_hex(unsigned char *data, size_t size)
 {
