@@ -40,6 +40,7 @@ Note: This section is for stages 2 and beyond.
 TODOS:
 - [x] Implement a binary safe dynamic string for use throughout the code. This can also be used as a dynamic byte array essentially.
 - [x] Implement a set of url helpers for building a url for consumption in libcurl. This is necessary because libcurl doesn't actually support (surprisingly) building a url from a base url and adding query parameters to it.
+- [] Cleanup the bencode parser. It's a bit of a mess right now and could use some refactoring.
 - [ ] Create the skeleton of the application state machine. This will be used to manage the state of the application as it progresses through the various stages of the bittorrent protocol. Don't go overboard with this, just enough to get the basic functionality working. (we have no idea what challenges are coming up next, so we don't want to over-engineer this)
 - [ ] tcp connection management. This will be used to manage the tcp connections to the tracker and the peers. This will be a simple wrapper around a socket and will somehow plug in with the application state to manage the back forth between the client, peers, and tracker (through libcurl).
 

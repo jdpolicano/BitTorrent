@@ -9,7 +9,7 @@
 #include "bencode.h"
 #include "url.h"
 #include "bstring.h"
-#include "bstring.h"
+#include "network.h"
 #include <openssl/sha.h>
 #include <curl/curl.h>
 #include <stdlib.h>
@@ -19,266 +19,11 @@ typedef struct {
     char *content;
 } FILE_CONTENT;
 
-typedef struct {
-    BString *data; 
-} RESPONSE;
-
 // print functions
 void print_tracker_url(Bencoded announce);
 void print_info(Bencoded info);
 void print_hex(unsigned char *data, size_t size);
-// misc functions
-bool hash_bencoded(unsigned char* hash, Bencoded bencoded);
 FILE_CONTENT read_file(const char *path);
-// curl functions
-static size_t handle_data(void *contents, size_t size, size_t nmemb, void *userp);
-void get_tracker_response(Bencoded torrent);
-void handle_bencoded_response(Bencoded response);
-
-void get_tracker_response(Bencoded torrent)
-{
-    Bencoded *announce = get_dict_key("announce", torrent);
-    if (announce == NULL)
-    {
-        fprintf(stderr, "ERR: 'announce' key not found in torrent meta");
-        return;
-    }
-
-    const char *tracker_url = (const char *)announce->data.string.chars;
-    size_t size = announce->data.string.size;
-
-    URL *url = url_new(tracker_url, size);
-    if (url == NULL)
-    {
-        fprintf(stderr, "ERR: failed to create URL object\n");
-        return;
-    }
-
-    // set query param "info_hash" to the SHA1 hash of the info dictionary
-    Bencoded *info = get_dict_key("info", torrent);
-    if (info == NULL)
-    {
-        
-        fprintf(stderr, "ERR: length key not found in info dict.");
-        url_free(url);
-        return;
-    }
-
-    unsigned char hash[SHA_DIGEST_LENGTH];
-    if (!hash_bencoded(hash, *info))
-    {
-        fprintf(stderr, "ERR: failed to hash bencoded info");
-        url_free(url);
-        return;
-    }  
-
-    char *escaped_hash = curl_easy_escape(NULL, (char *)hash, SHA_DIGEST_LENGTH);
-    if (escaped_hash == NULL)
-    {
-        fprintf(stderr, "ERR: failed to escape hash");
-        url_free(url);
-        return;
-    }
-
-    // set query param "info_hash" to the SHA1 hash of the info dictionary
-    if (url_append_query_param(url, "info_hash", escaped_hash) != URL_SUCCESS)
-    {
-        fprintf(stderr, "ERR: failed to append query param info_hash");
-        url_free(url);
-        curl_free(escaped_hash);
-        return;
-    }
-    curl_free(escaped_hash);
-
-    // set query param "peer_id" to a unique identifier
-    if (url_append_query_param(url, "peer_id", "00112233445566778899") != URL_SUCCESS)
-    {
-        fprintf(stderr, "ERR: failed to append query param peer_id");
-        url_free(url);
-        return;
-    }
-
-    // set query param "port" to the port the client is listening on
-    if (url_append_query_param(url, "port", "6881") != URL_SUCCESS)
-    {
-        fprintf(stderr, "ERR: failed to append query param port");
-        url_free(url);
-        return;
-    }
-
-    // set query param "uploaded" to the number of bytes uploaded
-    if (url_append_query_param(url, "uploaded", "0") != URL_SUCCESS)
-    {
-        fprintf(stderr, "ERR: failed to append query param uploaded");
-        url_free(url);
-        return;
-    }   
-
-    // set query param "downloaded" to the number of bytes downloaded
-    if (url_append_query_param(url, "downloaded", "0") != URL_SUCCESS)
-    {
-        fprintf(stderr, "ERR: failed to append query param downloaded");
-        url_free(url);
-        return;
-    }
-
-    Bencoded *length = get_dict_key("length", *info);
-    if (length == NULL)
-    {
-        fprintf(stderr, "ERR: length key not found in info dict.");
-        url_free(url);
-        return;
-    }
-
-    char *length_str = malloc(sizeof(char) * length->encoded_length); // this should be guaranteed to be enough
-    if (length_str == NULL)
-    {
-        
-        fprintf(stderr, "ERR: could not allocate memory for length_str.");
-        url_free(url);
-        return;
-    }
-
-    sprintf(length_str, "%li", length->data.integer);
-
-    if (url_append_query_param(url, "left", length_str) != URL_SUCCESS)
-    {
-        fprintf(stderr, "ERR: could not append query param left.");
-        url_free(url);
-        return;
-    }
-
-    if (url_append_query_param(url, "compact", "1") != URL_SUCCESS)
-    {
-        fprintf(stderr, "ERR: could not append query param compact.");
-        url_free(url);
-        return;
-    }
-
-    CURL *curl;
-    CURLcode res;
-    RESPONSE response_aggregator = {0};
-    response_aggregator.data = bstring_new(1024);
-    if (response_aggregator.data == NULL)
-    {
-        
-        fprintf(stderr, "ERR: could not alloc memory for response_aggregator.data.");
-        url_free(url);
-        return;
-    }
-
-    curl = curl_easy_init();
-
-    if (curl)
-    {
-        char* url_str = bstring_to_cstr(url->data);
-
-        curl_easy_setopt(curl, CURLOPT_URL, url_str);
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, handle_data);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_aggregator);
-
-        res = curl_easy_perform(curl);
-
-        if (res != CURLE_OK)
-        {
-            fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-        }
-
-        curl_easy_cleanup(curl);
-        url_free(url);
-        bstring_free(response_aggregator.data);
-    }
-}
-
-
-static size_t handle_data(void *contents, size_t size, size_t nmemb, void *userp)
-{
-    size_t realsize = size * nmemb;
-    RESPONSE *mem = (RESPONSE *)userp;
-    if (bstring_append_bytes(mem->data, contents, realsize) != BSTRING_SUCCESS)
-    {
-        fprintf(stderr, "ERR: failed to append data to response aggregator");
-        return 0;
-    }
-
-    Bencoded container;
-    size_t nbytes = decode_bencode((const char*)mem->data->chars, mem->data->size, &container);
-    if (nbytes == 0)
-    {
-        if (errno == PARSER_ERR_MEMORY || errno == PARSER_ERR_SYNTAX)
-        {
-            return 0;
-        }
-
-        return realsize;
-    }
-
-    handle_bencoded_response(container);
-    free_bencoded_inner(container);
-    return realsize;
-}
-
-void handle_bencoded_response(Bencoded b)
-{
-    if (b.type != DICTIONARY)
-    {
-        fprintf(stderr, "ERR: expected dictionary in response");
-        return;
-    }
-
-    Bencoded *failure_reason = get_dict_key("failure reason", b);
-    if (failure_reason != NULL)
-    {
-        if (failure_reason->type != STRING)
-        {
-            fprintf(stderr, "ERR: failure reason expected to be a string");
-            return;
-        }
-        printf("Failure Reason: %.*s\n", (int)failure_reason->data.string.size, failure_reason->data.string.chars);
-        return;
-    }
-
-    Bencoded *interval = get_dict_key("interval", b);
-    if (interval == NULL)
-    {
-        fprintf(stderr, "ERR: interval key not found in response");
-        return;
-    }
-
-    if (interval->type != INTEGER)
-    {
-        fprintf(stderr, "ERR: interval key expected to be an integer");
-        return;
-    }
-
-
-    Bencoded *peers = get_dict_key("peers", b);
-    if (peers == NULL)
-    {
-        fprintf(stderr, "ERR: peers key not found in response");
-        return;
-    }
-
-    if (peers->type == STRING)
-    {
-        if (peers->data.string.size % 6 != 0)
-        {
-            fprintf(stderr, "ERR: invalid length for peers string");
-            return;
-        }
-
-        for (size_t i = 0; i < peers->data.string.size; i += 6)
-        {
-            printf(
-                "%u.%u.%u.%u:%u\n", 
-                (unsigned char)peers->data.string.chars[i], 
-                (unsigned char)peers->data.string.chars[i + 1],
-                (unsigned char)peers->data.string.chars[i + 2], 
-                (unsigned char)peers->data.string.chars[i + 3], 
-                (unsigned char)peers->data.string.chars[i + 4] << 8 | (unsigned char)peers->data.string.chars[i + 5]);
-        }
-    }
-}
 
 void print_hex(unsigned char *data, size_t size)
 {
@@ -296,7 +41,7 @@ void print_torrent_meta(Bencoded torrent)
         exit(1);
     }
 
-    Bencoded *announce = get_dict_key("announce", torrent);
+    Bencoded *announce = get_dict_key(&torrent, "announce");
     if (announce == NULL)
     {
         fprintf(stderr, "ERR: 'announce' key not found in torrent meta");
@@ -304,7 +49,7 @@ void print_torrent_meta(Bencoded torrent)
     }
     print_tracker_url(*announce);
 
-    Bencoded *info = get_dict_key("info", torrent);
+    Bencoded *info = get_dict_key(&torrent, "info");
     if (info == NULL)
     {
         fprintf(stderr, "ERR: 'info' key not found in torrent meta");
@@ -322,7 +67,7 @@ void print_tracker_url(Bencoded announce)
         return;
     }
 
-    printf("Tracker URL: %.*s\n", (int)announce.data.string.size, announce.data.string.chars);
+    printf("Tracker URL: %.*s\n", (int)announce.data.string->size, announce.data.string->chars);
 }
 
 void print_info(Bencoded info)
@@ -333,7 +78,7 @@ void print_info(Bencoded info)
         return;
     }
 
-    Bencoded *length = get_dict_key("length", info);
+    Bencoded *length = get_dict_key(&info, "length");
     if (length == NULL)
     {
         fprintf(stderr, "ERR: length key not found in info dict.");
@@ -350,7 +95,7 @@ void print_info(Bencoded info)
 
     // print the info hash
     char hash[SHA_DIGEST_LENGTH];
-    if (!hash_bencoded((unsigned char *)hash, info))
+    if (!hash_bencoded((unsigned char *)hash, &info))
     {
         fprintf(stderr, "ERR: failed to hash bencoded info");
         return;
@@ -361,7 +106,7 @@ void print_info(Bencoded info)
     printf("\n");
 
     // print piece length
-    Bencoded *piece_length = get_dict_key("piece length", info);
+    Bencoded *piece_length = get_dict_key(&info, "piece length");
     if (piece_length == NULL)
     {
         fprintf(stderr, "ERR: piece length key not found in info dict.");
@@ -377,7 +122,7 @@ void print_info(Bencoded info)
     printf("Piece Length: %li\n", piece_length->data.integer);
 
     // print the pieces
-    Bencoded *pieces = get_dict_key("pieces", info);
+    Bencoded *pieces = get_dict_key(&info, "pieces");
     if (pieces == NULL)
     {
         fprintf(stderr, "ERR: pieces key not found in info dict.");
@@ -390,7 +135,7 @@ void print_info(Bencoded info)
         return;
     }
 
-    if (pieces->data.string.size % SHA_DIGEST_LENGTH != 0)
+    if (pieces->data.string->size % SHA_DIGEST_LENGTH != 0)
     {
         fprintf(stderr, "ERR: pieces key inside info has invalid length.");
         return;
@@ -398,25 +143,11 @@ void print_info(Bencoded info)
 
     printf("Piece Hashes:\n");
 
-    for(size_t i = 0; i < pieces->data.string.size; i += SHA_DIGEST_LENGTH)
+    for(size_t i = 0; i < pieces->data.string->size; i += SHA_DIGEST_LENGTH)
     {
-        print_hex((unsigned char *)pieces->data.string.chars + i, SHA_DIGEST_LENGTH);
+        print_hex((unsigned char *)pieces->data.string->chars + i, SHA_DIGEST_LENGTH);
         printf("\n");
     }
-}
-
-bool hash_bencoded(unsigned char* hash, Bencoded b)
-{
-    char *buf = malloc(b.encoded_length);
-    if (buf == NULL)
-    {
-        fprintf(stderr, "ERR: failed to allocate memory for bencoded string");
-        return false;
-    }
-    size_t size = encode_bencode(b, buf);
-    SHA1((unsigned char *)buf, size, hash);
-    free(buf);
-    return true;
 }
 
 FILE_CONTENT read_file(const char *path)
@@ -480,13 +211,13 @@ int main(int argc, char *argv[])
         const char *encoded_str = argv[2];
         size_t len = strlen(encoded_str);
         Bencoded container;
-        size_t nbytes = decode_bencode(encoded_str, len, &container);
-        if (nbytes == 0)
+        int result = decode_bencode(&container, encoded_str, len);
+        if (result != PARSER_SUCCESS)
         {
-            fprintf(stderr, "Failed to decode bencoded string\n");
+            fprintf(stderr, "ERR: failed to decode bencoded value\n");
             return 1;
         }
-        print_bencoded(stdout, container, true);
+        print_bencoded(container, stdout, true);
         free_bencoded_inner(container);
     }
 
@@ -499,7 +230,12 @@ int main(int argc, char *argv[])
             return 1;
         }
         Bencoded container;
-        size_t nbytes = decode_bencode(file_contents.content, file_contents.size, &container);
+        int result = decode_bencode(&container, file_contents.content, file_contents.size);
+        if (result != PARSER_SUCCESS)
+        {
+            fprintf(stderr, "ERR: failed to decode bencoded string\n");
+            return 1;
+        }
         print_torrent_meta(container);
         free_bencoded_inner(container);
     }
@@ -515,8 +251,114 @@ int main(int argc, char *argv[])
             return 1;
         }
         Bencoded container;
-        size_t nbytes = decode_bencode(file_contents.content, file_contents.size, &container);
-        get_tracker_response(container);
+        int result = decode_bencode(&container, file_contents.content, file_contents.size);
+        if (result != PARSER_SUCCESS)
+        {
+            fprintf(stderr, "ERR: failed to decode bencoded string\n");
+            return 1;
+        }
+
+        Tracker_Response *res = get_tracker_response(&container);
+
+        if (!res->ok)
+        {
+            fprintf(stderr, "ERR: failed to get tracker response\n");
+            free_bencoded_inner(container);
+            tracker_response_free(res);
+            return 1;
+        }
+
+        for (int i = 0; i < res->parsed.peers_count; i++)
+        {
+            printf("%.*s:%d\n", (int)res->parsed.peers[i].ip->size, res->parsed.peers[i].ip->chars, res->parsed.peers[i].port);
+        }
+    }
+    else if (strcmp(command, "handshake") == 0)
+    {
+        const char *torrent_path = argv[2];
+        const char *peer_addr = argv[3];
+
+        FILE_CONTENT file_contents = read_file(torrent_path);
+        if (file_contents.content == NULL || file_contents.size == 0)
+        {
+            fprintf(stderr, "ERR: failed to read file contents\n");
+            fprintf(stderr, "torrent path %s\n", torrent_path);
+            return 1;
+        }
+
+        Bencoded container;
+        int result = decode_bencode(&container, file_contents.content, file_contents.size);
+        if (result != PARSER_SUCCESS)
+        {
+            fprintf(stderr, "ERR: failed to decode bencoded string\n");
+            return 1;
+        }
+
+        int socket = connect_to_inet_cstr(peer_addr);
+
+        if (socket < 0)
+        {
+            fprintf(stderr, "ERR: failed to connect to peer\n");
+            free_bencoded_inner(container);
+            return 1;
+        }
+        fprintf(stderr, "Connected to peer\n");
+
+        BString *msg = bstring_new(1024);
+        // todo this should likely be put in a struct so we can reuse it later in the protocol.
+        BString *info_hash = get_info_hash(&container);
+        if (info_hash == NULL)
+        {
+            fprintf(stderr, "ERR: failed to get info hash\n");
+            free_bencoded_inner(container);
+            bstring_free(msg);
+            return 1;
+        }
+
+        char *protocol = "BitTorrent protocol";
+        size_t protocol_len = strlen(protocol);
+        fprintf(stderr, "msg size: %lu\n", msg->size);
+        bstring_append_char(msg, protocol_len); // length of the handshake message
+        fprintf(stderr, "msg size: %lu\n", msg->size);
+        bstring_append_cstr(msg, protocol);
+        fprintf(stderr, "msg size: %lu\n", msg->size);
+        bstring_append_nchars(msg, 0, 8); // 8 reserved bytes
+        fprintf(stderr, "msg size: %lu\n", msg->size);
+        bstring_append_bstring(msg, info_hash); // info hash
+        fprintf(stderr, "msg size: %lu\n", msg->size);
+        bstring_append_cstr(msg, "00112233445566778899"); // peer id, hardcoded for now.
+        fprintf(stderr, "msg size: %lu\n", msg->size);
+
+        fprintf(stderr, "msg: %u\n", msg->chars[0]);   
+        ;
+
+        if (send(socket, (unsigned char *)msg->chars, msg->size, 0) < 0)
+        {
+            fprintf(stderr, "ERR: failed to write to socket\n");
+            free_bencoded_inner(container);
+            bstring_free(msg);
+            return 1;
+        }
+
+        fprintf(stderr, "Handshake sent\n");
+
+        BString *response = bstring_new(1024);
+        if (response == NULL)
+        {
+            fprintf(stderr, "ERR: failed to allocate buffer for response\n");
+            free_bencoded_inner(container);
+            bstring_free(msg);
+            return 1;
+        }
+
+        unsigned char buffer[1024];
+        size_t bytes_read = recv(socket, buffer, 1024, 0);
+        bstring_append_bytes(response, buffer, bytes_read);
+
+        printf("Peer ID: ");
+        print_hex((unsigned char *)response->chars + 48, 20);
+        printf("\n");
+
         free_bencoded_inner(container);
     }
 

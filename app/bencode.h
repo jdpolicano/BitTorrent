@@ -7,9 +7,8 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <stdbool.h>
-#include <errno.h>
+#include "bstring.h"
 
 // Define custom error codes
 #define PARSER_SUCCESS 0
@@ -29,13 +28,6 @@ typedef enum
 // Forward declaration of Bencoded
 typedef struct Bencoded Bencoded;
 
-// binary safe immutable string.
-typedef struct
-{
-    size_t size;
-    char *chars;
-} BencodedString;
-
 // Separate struct for list data
 typedef struct
 {
@@ -46,7 +38,7 @@ typedef struct
 // Separate struct for dictionary elements
 typedef struct
 {
-    BencodedString key;
+    BString *key;
     Bencoded *value;
 } BencodedDictElement;
 
@@ -64,23 +56,65 @@ struct Bencoded
     long encoded_length;
     union
     {
-        BencodedString string;
+        BString *string;
         long integer;
         BencodedList list;
         BencodedDictionary dictionary;
     } data;
 };
 
-// Function prototypes
-void print_bencoded(FILE* fd, Bencoded b, bool flush_output);
+/**
+ * Prints the given Bencoded data structure.
+ * @param b The Bencoded data structure to print.
+ * @param fd The file descriptor to print to.
+ * @param flush_output If true, flushes the output after printing.
+ */
+void print_bencoded(Bencoded b, FILE* fd, bool flush_output);
+
+/**
+ * Allocates memory for a new Bencoded data structure.
+ * @return A pointer to the newly allocated Bencoded data structure.
+ */
 Bencoded *get_bencoded();
-// frees a struct that was heap alloc'd
-void free_bencoded(Bencoded *b); 
-// frees just the inner allocations if the struct was stack alloc'd or part
-// of an array.
+
+/**
+ * Frees the memory allocated for a Bencoded data structure.
+ * @param b The Bencoded data structure to free.
+ * @return void
+*/
+void free_bencoded(Bencoded *b);
+
+/**
+ * Frees the memory allocated for a Bencoded data structure's inner data.
+ * Useful if the Bencoded data structure was stack allocated.
+ * @param b The Bencoded data structure to free.
+ * @return void
+ */
 void free_bencoded_inner(Bencoded b);
-Bencoded *get_dict_key(const char *search_str, Bencoded b);
-size_t decode_bencode(const char *bencoded_value, size_t stream_length, Bencoded *container);
-size_t encode_bencode(Bencoded b, char *target);
+
+/**
+ * Gets the Bencoded data structure at the given index in a list.
+ * @param b The Bencoded data structure containing the list.
+ * @param search_str the string to search for in the dictionary
+*/
+Bencoded *get_dict_key(Bencoded *b, const char *search_str);
+
+/**
+ * Decodes a Bencoded string into a Bencoded data structure.
+ * @param container The Bencoded data structure to store the decoded data.
+ * @param bencoded_value The Bencoded string to decode.
+ * @param stream_length The length of the Bencoded string.
+ * @return The size of the decoded data, or an error code less than 0; -1 for partial data, -2 for syntax error, -3 for memory error.
+ */
+int decode_bencode(Bencoded *container, const char *bencoded_value, size_t stream_length);
+
+
+/**
+ * Encodes a Bencoded data structure into a Bencoded string.
+ * @param b The Bencoded data structure to encode.
+ * @param target The target string to store the encoded data.
+ * @return The size of the encoded data.
+*/
+size_t encode_bencode(Bencoded *b, char *target);
 
 #endif // BENCODE_H
