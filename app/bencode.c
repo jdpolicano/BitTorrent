@@ -628,6 +628,7 @@ size_t route_bencode(Bencoded *b, char *target)
 
     return 0;
 }
+
 ////////////////////////////////////////////////////////////////
 ////////////////////////// Public API //////////////////////////
 ////////////////////////////////////////////////////////////////
@@ -687,7 +688,7 @@ Bencoded *get_dict_key(Bencoded *b, const char *search_str)
     for (size_t i = 0; i < dict.size; i++)
     {
         BencodedDictElement el = dict.elements[i];
-        if (bstring_cmp_cstr(*el.key, search_str) == 0)
+        if (bstring_cmp_cstr(el.key, search_str) == 0)
         {
             return el.value;
         }
@@ -760,5 +761,10 @@ void print_bencoded(Bencoded b, FILE* fd, bool flush_output)
     {
         fprintf(fd, "\n");
     }
+}
+
+bool typeis(Bencoded *b, BType type)
+{
+    return b->type == type;
 }
 

@@ -108,7 +108,6 @@ Bencoded *get_dict_key(Bencoded *b, const char *search_str);
  */
 int decode_bencode(Bencoded *container, const char *bencoded_value, size_t stream_length);
 
-
 /**
  * Encodes a Bencoded data structure into a Bencoded string.
  * @param b The Bencoded data structure to encode.
@@ -116,5 +115,15 @@ int decode_bencode(Bencoded *container, const char *bencoded_value, size_t strea
  * @return The size of the encoded data.
 */
 size_t encode_bencode(Bencoded *b, char *target);
+
+
+/**
+ * Checks if a Bencoded data structure is of a certain type.
+ * @param b The Bencoded data structure to check.
+ * @param type The type to check for.
+ * @return true if the Bencoded data structure is of the given type, false otherwise.
+*/
+bool typeis(Bencoded *b, BType type);
+
 
 #endif // BENCODE_H

@@ -7,11 +7,9 @@
  * The decoded value is then printed to the console.
  */
 #include "bencode.h"
-#include "url.h"
 #include "bstring.h"
 #include "network.h"
-#include <openssl/sha.h>
-#include <curl/curl.h>
+#include "torrent.h"
 #include <stdlib.h>
 
 typedef struct {
@@ -273,8 +271,15 @@ int main(int argc, char *argv[])
             printf("%.*s:%d\n", (int)res->parsed.peers[i].ip->size, res->parsed.peers[i].ip->chars, res->parsed.peers[i].port);
         }
     }
+
     else if (strcmp(command, "handshake") == 0)
     {
+        if (argc < 4)
+        {
+            fprintf(stderr, "Usage: your_bittorrent.sh handshake <torrent_path> <peer_addr>\n");
+            return 1;
+        }
+
         const char *torrent_path = argv[2];
         const char *peer_addr = argv[3];
 
@@ -294,7 +299,7 @@ int main(int argc, char *argv[])
             return 1;
         }
 
-        int socket = connect_to_inet_cstr(peer_addr);
+        int socket = tcp_connect_inet_cstr(peer_addr);
 
         if (socket < 0)
         {
@@ -302,64 +307,60 @@ int main(int argc, char *argv[])
             free_bencoded_inner(container);
             return 1;
         }
+
         fprintf(stderr, "Connected to peer\n");
 
         BString *msg = bstring_new(1024);
         // todo this should likely be put in a struct so we can reuse it later in the protocol.
         BString *info_hash = get_info_hash(&container);
-        if (info_hash == NULL)
+
+        Peer_Header_BitTorrent *header = handshake(socket, info_hash->chars, (unsigned char *)"00112233445566778899");
+
+        if (header == NULL)
         {
-            fprintf(stderr, "ERR: failed to get info hash\n");
+            fprintf(stderr, "ERR: failed to connect with client at %s\n", peer_addr);
             free_bencoded_inner(container);
             bstring_free(msg);
             return 1;
         }
-
-        char *protocol = "BitTorrent protocol";
-        size_t protocol_len = strlen(protocol);
-        fprintf(stderr, "msg size: %lu\n", msg->size);
-        bstring_append_char(msg, protocol_len); // length of the handshake message
-        fprintf(stderr, "msg size: %lu\n", msg->size);
-        bstring_append_cstr(msg, protocol);
-        fprintf(stderr, "msg size: %lu\n", msg->size);
-        bstring_append_nchars(msg, 0, 8); // 8 reserved bytes
-        fprintf(stderr, "msg size: %lu\n", msg->size);
-        bstring_append_bstring(msg, info_hash); // info hash
-        fprintf(stderr, "msg size: %lu\n", msg->size);
-        bstring_append_cstr(msg, "00112233445566778899"); // peer id, hardcoded for now.
-        fprintf(stderr, "msg size: %lu\n", msg->size);
-
-        fprintf(stderr, "msg: %u\n", msg->chars[0]);   
-        ;
-
-        if (send(socket, (unsigned char *)msg->chars, msg->size, 0) < 0)
-        {
-            fprintf(stderr, "ERR: failed to write to socket\n");
-            free_bencoded_inner(container);
-            bstring_free(msg);
-            return 1;
-        }
-
-        fprintf(stderr, "Handshake sent\n");
-
-        BString *response = bstring_new(1024);
-        if (response == NULL)
-        {
-            fprintf(stderr, "ERR: failed to allocate buffer for response\n");
-            free_bencoded_inner(container);
-            bstring_free(msg);
-            return 1;
-        }
-
-        unsigned char buffer[1024];
-        size_t bytes_read = recv(socket, buffer, 1024, 0);
-        bstring_append_bytes(response, buffer, bytes_read);
 
         printf("Peer ID: ");
-        print_hex((unsigned char *)response->chars + 48, 20);
+        print_hex((unsigned char *)header->peer_id, 20);
         printf("\n");
 
         free_bencoded_inner(container);
+    }
+
+    else if (strcmp(command, "download_piece") == 0)
+    {
+        if (argc < 5)
+        {
+            fprintf(stderr, "Usage: your_bittorrent.sh download_piece -o <output_path> <torrent_path> <piece_index>\n");
+            return 1;
+        }
+
+        const char *torrent_path = argv[4];
+        const char *piece_index_str = argv[5];
+
+        fprintf(stderr, "Downloading piece %s from torrent %s\n", piece_index_str, torrent_path);
+
+        FILE_CONTENT file_contents = read_file(torrent_path);
+        if (file_contents.content == NULL || file_contents.size == 0)
+        {
+            fprintf(stderr, "ERR: failed to read file contents\n");
+            fprintf(stderr, "torrent path %s\n", torrent_path);
+            return 1;
+        }
+
+        TorrentFile *torrent = torrent_file_new(file_contents.content, file_contents.size);
+        if (torrent == NULL)
+        {
+            fprintf(stderr, "ERR: failed to parse torrent file\n");
+            return 1;
+        }
+
+        print_torrent_file(stdout, torrent);
+        torrent_file_free(torrent);
     }
 
     else

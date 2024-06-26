@@ -127,27 +127,27 @@ Pop bstring_pop(BString *bstr) {
     return pop;
 }
 
-int bstring_cmp(BString bstr1, BString bstr2) {
-    if (bstr1.size != bstr2.size) {
-        return bstr1.size - bstr2.size;
+int bstring_cmp(BString *bstr1, BString *bstr2) {
+    if (bstr1->size != bstr2->size) {
+        return bstr1->size - bstr2->size;
     }
-    return memcmp(bstr1.chars, bstr2.chars, bstr1.size);
+    return memcmp(bstr1->chars, bstr2->chars, bstr1->size);
 }
 
-int bstring_cmp_cstr(BString bstr, const char *cstr) {
+int bstring_cmp_cstr(BString *bstr, const char *cstr) {
     size_t cstr_len = strlen(cstr);
-    if (bstr.size != cstr_len) {
-        return bstr.size - cstr_len;
+    if (bstr->size != cstr_len) {
+        return bstr->size - cstr_len;
     }
-    return memcmp(bstr.chars, cstr, bstr.size);
+    return memcmp(bstr->chars, cstr, bstr->size);
 }
 
-char* bstring_to_cstr(BString bstr) {
-    char *cstr = malloc(bstr.size + 1);
+char* bstring_to_cstr(BString *bstr) {
+    char *cstr = malloc(bstr->size + 1);
     if (cstr == NULL) {
         return NULL;
     }
-    memcpy(cstr, bstr.chars, bstr.size);
-    cstr[bstr.size] = '\0';
+    memcpy(cstr, bstr->chars, bstr->size);
+    cstr[bstr->size] = '\0';
     return cstr;
 }

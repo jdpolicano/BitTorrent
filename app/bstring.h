@@ -111,7 +111,7 @@ Pop bstring_pop(BString *bstr);
  * @param bstr2 The second BString
  * @return int 0 if the strings are equal, a negative integer if bstr1 is less than bstr2, a positive integer if bstr1 is greater than bstr2
 */
-int bstring_cmp(BString bstr1, BString bstr2);
+int bstring_cmp(BString *bstr1, BString *bstr2);
 
 /**
  * @brief compare a bstring to a c string
@@ -120,7 +120,7 @@ int bstring_cmp(BString bstr1, BString bstr2);
  * @param cstr The C string
  * @return int 0 if the strings are equal, a negative integer if bstr is less than cstr, a positive integer if bstr is greater than cstr
 */
-int bstring_cmp_cstr(BString bstr, const char *cstr);
+int bstring_cmp_cstr(BString *bstr, const char *cstr);
 
 /**
  * @brief Get the BString as a cstring. The caller is responsible for ensuring the 
@@ -130,7 +130,7 @@ int bstring_cmp_cstr(BString bstr, const char *cstr);
  * @param bstr The BString
  * @return char* The BString as a C string
 */
-char *bstring_to_cstr(BString bstr);
+char *bstring_to_cstr(BString *bstr);
 
 
 int bstring_append_nchars(BString *bstr, char c, size_t n);
